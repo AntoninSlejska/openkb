@@ -52,7 +52,7 @@ export function useFieldValidation(options: FieldValidationOptions): FieldValida
   const debounceMs = options.debounceMs ?? 1000
   const request = options.request
     ?? ((nid: number, fields: FieldValues) =>
-      $fetch<ValidateResponse>(`/api/node/${nid}/validate`, { method: 'POST', body: { fields } }))
+      csrfFetch<ValidateResponse>(`/api/node/${nid}/validate`, { method: 'POST', body: { fields } }))
 
   const liveErrors = ref<Record<string, string[]>>({})
   const pending = new Set<string>()

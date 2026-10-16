@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { createFieldSource } from './drupal-fields'
+import { stubFetch } from '../test-support/h3'
 
 const SCHEMA = {
   properties: {
@@ -11,24 +12,6 @@ const SCHEMA = {
     },
   },
   body: { allowedHtml: { p: [] } },
-}
-
-/** Records requested URLs and answers them from a per-path map. */
-function stubFetch(responses: Record<string, { status?: number, body?: unknown }>) {
-  const urls: string[] = []
-  const impl = vi.fn(async (input: string | URL) => {
-    const url = String(input)
-    urls.push(url)
-    const match = Object.entries(responses).find(([path]) => url.includes(path))
-    const { status = 200, body = {} } = match?.[1] ?? { status: 404 }
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => body,
-    } as Response
-  })
-  vi.stubGlobal('fetch', impl)
-  return { urls, impl }
 }
 
 afterEach(() => { vi.unstubAllGlobals() })
@@ -44,7 +27,7 @@ describe('createFieldSource', () => {
   })
 
   it('carries the body format\'s allowed HTML off the same read', async () => {
-    const { urls } = stubFetch({ '/openkb/schema': { body: SCHEMA } })
+    const urls = stubFetch({ '/openkb/schema': { body: SCHEMA } })
     const source = createFieldSource('http://drupal.test')
 
     await source.fetchSpecs()
@@ -53,7 +36,7 @@ describe('createFieldSource', () => {
   })
 
   it('caches the exposure contract instead of re-fetching it per poll tick', async () => {
-    const { urls } = stubFetch({ '/openkb/schema': { body: SCHEMA } })
+    const urls = stubFetch({ '/openkb/schema': { body: SCHEMA } })
     let clock = 0
     const source = createFieldSource('http://drupal.test', () => clock)
 
@@ -74,7 +57,7 @@ describe('createFieldSource', () => {
   })
 
   it('does not cache a failed schema fetch', async () => {
-    const { urls } = stubFetch({ '/openkb/schema': { status: 503 } })
+    const urls = stubFetch({ '/openkb/schema': { status: 503 } })
     const source = createFieldSource('http://drupal.test')
 
     await source.fetchSpecs()

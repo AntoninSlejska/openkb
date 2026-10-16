@@ -32,13 +32,16 @@ export interface LinkSelection {
 
 let consumed: (LinkSelection & { at: number }) | null = null
 
-/** Records the words the `[[` at `at` is about. */
+/**
+ * Records the words the `[[` at `at` is about. A range is kept even without
+ * words: a citation being retargeted has none.
+ */
 export function recordLinkSelection(
   text: string,
   at: number,
   range: { from: number, to: number } | null = null,
 ): void {
-  consumed = text.trim() ? { text, range, at } : null
+  consumed = text.trim() || range ? { text, range, at } : null
 }
 
 /** The words the `[[` at `at` is about. Reads once. */

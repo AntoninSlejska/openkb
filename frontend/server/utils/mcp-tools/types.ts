@@ -14,6 +14,8 @@ import type { H3Event } from 'h3'
  */
 export interface KbTool {
   name: string
+  /** The tool's `mcp_tool_config` id: the name Drupal's tool manifest lists it under. */
+  manifestName: string
   description: string
   inputSchema: JsonSchema
   outputSchema?: JsonSchema

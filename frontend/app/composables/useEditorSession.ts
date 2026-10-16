@@ -40,9 +40,6 @@ import type { FieldValidationApi } from '~/composables/useFieldValidation'
 import { TITLE_KEY, type FieldValue } from '~~/server/utils/entity-fields'
 import { FALLBACK_COLOR, FALLBACK_NAME, claimsByBlock, collabColor, presenceFromStates, readableInkOn, type AwarenessUser } from '#shared/utils/presence'
 
-interface UserHit { uid: number, name: string }
-interface MentionItem { label: string, id: number }
-
 export interface Page {
   id: string
   nid: number
@@ -104,6 +101,8 @@ export async function useEditorSession(
   const page = pageAsync.data as Ref<Page | null>
 
   const ydoc = new Y.Doc()
+  // After the editor subtree and the provider are gone.
+  onUnmounted(() => ydoc.destroy())
   const initialChanged = computed(() => page.value?.changed ?? 0)
 
   const docName = computed(() => `node:${nid.value}`)
@@ -325,7 +324,7 @@ export async function useEditorSession(
 
   // Called before the page await: it holds a useFetch, which needs Nuxt's
   // async-data context.
-  const { docItems, searchDocs, docLabel } = useDocLinkSearch()
+  const { docItems, searchDocs, docLabel, resolveTarget } = useDocLinkSearch()
 
   const fieldValidation = useFieldValidation({
     nid,
@@ -428,6 +427,9 @@ export async function useEditorSession(
 
   const savedAgo = useRelativeTime(lastSavedAt)
   const toast = useToast()
+
+  // Before the page await: only there does this composable have a scope.
+  const { mentionQuery, mentionItems } = useMentionSearch()
 
   useBeforeUnloadGuard(computed(() => commitStatus.value === 'dirty' || commitStatus.value === 'saving'))
 
@@ -622,30 +624,6 @@ export async function useEditorSession(
   }
 
   function reload() { window.location.reload() }
-
-  const mentionQuery = ref('')
-  const mentionItems = ref<MentionItem[]>([])
-  let mentionAbort: AbortController | null = null
-  let mentionTimer: ReturnType<typeof setTimeout> | null = null
-
-  watch(mentionQuery, (q) => {
-    if (mentionTimer) clearTimeout(mentionTimer)
-    mentionTimer = setTimeout(async () => {
-      if (mentionAbort) mentionAbort.abort()
-      mentionAbort = new AbortController()
-      if (!q) { mentionItems.value = []; return }
-      try {
-        const res = await fetch(`/api/users/search?q=${encodeURIComponent(q)}`, {
-          signal: mentionAbort.signal,
-          credentials: 'same-origin',
-        })
-        if (!res.ok) { mentionItems.value = []; return }
-        const data = await res.json() as { users: UserHit[] }
-        mentionItems.value = (data.users ?? []).map(u => ({ label: u.name, id: u.uid }))
-      }
-      catch { /* aborted or network */ }
-    }, 120)
-  })
 
   function attachFile() {
     toast.add({
@@ -1272,6 +1250,7 @@ export async function useEditorSession(
     docItems,
     searchDocs,
     docLabel,
+    resolveTarget,
     markdown,
     save,
     revert,

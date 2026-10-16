@@ -9,7 +9,7 @@ import { fetchUpstream } from './upstream'
  * the server. It is therefore one required `client_credentials` OAuth client:
  * server-initiated requests carry its Bearer token and nothing else, and what
  * it may do is what its role says (`use collaboration api`,
- * `state inline comment authors`). Peers still authenticate their websocket
+ * `use inline comments api`). Peers still authenticate their websocket
  * with their own session — who may join a document is unchanged.
  *
  * A captured peer cookie is never replayed on a request the server starts. A

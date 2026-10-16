@@ -13,6 +13,7 @@ import type { KbTool } from './types'
 export function commentOnBlockTool(): KbTool {
   return {
     name: 'commentOnBlock',
+    manifestName: 'comment_on_block',
     description:
       'Say something about one block of a knowledge-base page — a reply to an '
       + 'open thread (pass its `threadId`), or a new thread on the block (leave '

@@ -23,7 +23,7 @@ docker compose build              # builds openkb-drupal and openkb-frontend fro
 docker compose up -d
 ```
 
-The `drupal` container installs the site on its first boot: the install state the image carries, the collaboration server's OAuth client from `OKB_COLLAB_CLIENT_ID` / `OKB_COLLAB_CLIENT_SECRET`, and the `admin` password from `ADMIN_PASSWORD` — or a generated one, printed to the container log. Both services answer with a "setting up" page (`503`, `Retry-After`) until the install is through, and `docker compose logs -f drupal` carries it. A restart of an installed site reinstalls nothing.
+The `drupal` container installs the site on its first boot: the install state the image carries, the collaboration server's OAuth client from `OKB_COLLAB_CLIENT_ID` / `OKB_COLLAB_CLIENT_SECRET`, and the `admin` password from `ADMIN_PASSWORD` — or a generated one, printed to the container log. Both services answer with a "setting up" page (`503`, `Retry-After`) until the install is through, and `docker compose logs -f drupal` carries it. A restart of an installed site reinstalls nothing; a restart after a failed install installs again. A database that holds tables but no finished OpenKB install is left alone: the setup page stays up and the log names the ways out, each followed by a restart of the `drupal` service: `openkb-update` for a working site that lacks the marker, `openkb-install`, which destroys what the database holds, or an empty database.
 
 `docker compose exec drupal openkb-install` is the manual re-install; it destroys the site it finds.
 
@@ -43,21 +43,54 @@ From a shell instead, `docker compose exec drupal drush updatedb` runs the same 
 
 Both ways end in a cache rebuild, and that is what lifts the hold.
 
-Both services listen on plain HTTP, bound to `127.0.0.1`: `drupal` on `DRUPAL_HTTP_PORT` (8080), `frontend` on `FRONTEND_HTTP_PORT` (3000).
+If your site imports its own `config/sync` after `updatedb`, export the config again right after `updatedb` and before the import: updates add config (such as the prompt safety guardrail sets, `docs/ai-chat.md`) that an older export would delete.
+
+Both services listen on plain HTTP, bound to `127.0.0.1`: `drupal` on `DRUPAL_HTTP_PORT` (8080), `frontend` on `FRONTEND_HTTP_PORT` (3000). `DRUPAL_LISTEN_IP` / `FRONTEND_LISTEN_IP` open them to other hosts; then narrow `REVERSE_PROXY_ADDRESSES` to the proxy's address, or any host that reaches the port sets the client IP and the scheme Drupal sees. Open the frontend port to the proxy only: the frontend passes on the `X-Forwarded-For` it receives, so a client reaching it directly sets the address Drupal's login flood keys on.
+
+## Outgoing mail
+
+Drupal sends account mails — a new account's login link, password resets. The image has no mail server, so nothing leaves the site until `MAILER_DSN` names a transport:
+
+```sh
+MAILER_DSN=smtp://user:pass@smtp.example.com:587   # URL-encode the user and password
+MAIL_FROM=kb@example.com                           # the sender address
+```
+
+`MAILER_DSN` switches Drupal to core's Symfony mailer with that transport; STARTTLS is used where the server offers it. Use `smtp` or `smtps`: the other [built-in transports](https://symfony.com/doc/current/mailer.html#using-built-in-transports), `sendmail` and `native`, need a local mail server the image lacks. A DSN without scheme or host is ignored, and mail stays off.
+
+Set `MAIL_FROM` to an address the relay may send as. Unset, the sender is the installed site mail, `admin@example.com`, which relays reject.
+
+Check it with a password reset from `https://admin.kb.example.com/user/password`; `/admin/reports/dblog` names the error when a mail fails.
+
+Many hosts block outgoing SMTP on ports 25, 465 and 587 — netcup's default firewall policy does. Relays also listen on 2525, which passes such a firewall unchanged, e.g. Brevo:
+
+```sh
+MAILER_DSN=smtp://LOGIN%40smtp-brevo.com:SMTP_KEY@smtp-relay.brevo.com:2525
+```
+
+Brevo's SMTP login carries an `@`; it is written `%40` in the DSN.
 
 ## The reverse proxy
 
 Whatever proxy sits in front has to:
 
-- forward each hostname to its port, and set `X-Forwarded-Proto` and `X-Forwarded-Host` — Drupal trusts them from the addresses in `REVERSE_PROXY_ADDRESSES`;
+- forward each hostname to its port, and set `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host` — Drupal trusts these three, and no other forwarded header, from the addresses in `REVERSE_PROXY_ADDRESSES`;
+- keep the `X-Forwarded-For` the frontend container sends and append to it, rather than replace it: the frontend relays the sign-in and password-reset forms to Drupal through the proxy, passing on the `X-Forwarded-For` it received, and Drupal's login flood keys on the client address that header carries. Drupal locks a client address after 50 failed attempts per hour, and an account after 5 failed attempts from the same address per 6 hours. A proxy that replaces the header puts every sign-in behind one address — 50 failed attempts from anyone lock the sign-in for everyone for an hour, and 5 on one account lock that account for everyone for 6 hours. Caddy and Traefik replace it unless the frontend's address is a trusted proxy (below); nginx's `$proxy_add_x_forwarded_for` appends;
+- trust only the addresses the frontend and the proxy really use: a client on a trusted address can set its own `X-Forwarded-For` and rotate past the flood. The private ranges below suit a host whose only private-address clients are its containers; where clients reach the proxy from private addresses (intranet, VPN), narrow `REVERSE_PROXY_ADDRESSES` and `trusted_proxies` / `trustedIPs` to the docker network;
 - upgrade WebSocket connections on `/collaboration` of the frontend host;
 - allow at least 300 s idle on the frontend host: the collaboration server pings every 60 s.
 
 Both services call each other under their public URLs, so the two names must also resolve from inside the containers — true for public DNS, and the Caddy overlay adds the in-network aliases itself.
 
-**Caddy** (a complete configuration; Caddy sets the forwarded headers and passes WebSockets through by itself):
+**Caddy** (a complete configuration; Caddy sets the forwarded headers and passes WebSockets through by itself; `trusted_proxies` makes it keep the frontend's `X-Forwarded-For`):
 
 ```caddyfile
+{
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
 kb.example.com {
 	reverse_proxy 127.0.0.1:3000
 }
@@ -87,7 +120,7 @@ services:
       - traefik.http.services.okb-drupal.loadbalancer.server.port=8080
 ```
 
-Traefik upgrades WebSockets on its own; raise `--entrypoints.websecure.transport.respondingTimeouts.idleTimeout` to `300s`.
+Traefik upgrades WebSockets on its own; raise `--entrypoints.websecure.transport.respondingTimeouts.idleTimeout` to `300s`. To keep the frontend's `X-Forwarded-For`, trust the docker networks on the entrypoint: `--entrypoints.websecure.forwardedHeaders.trustedIPs=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16`.
 
 **nginx** (one `server` block per hostname; shown for the frontend, Drupal is the same without the `/collaboration` location and with port 8080):
 
@@ -126,7 +159,7 @@ ingress:
 | Volume | Holds |
 |---|---|
 | `mariadb-data` | the database |
-| `drupal-files` | `/app/files`: public and private files, the config sync directory, the OAuth keys, the `.openkb-installed` marker |
+| `drupal-files` | `/app/files`: public and private files, the config sync directory, the OAuth keys, the `.openkb-installed` and `.openkb-installing` markers |
 | `collab-store` | the collaboration server's snapshot store: edits not yet saved to Drupal |
 | `opensearch-data` | the search index — rebuildable: `drush search-api:reset-tracker kb_chunks && drush search-api:index kb_chunks` |
 

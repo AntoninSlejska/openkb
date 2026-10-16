@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { useChatSession, useChatPanelSession, TRANSPORT_ERROR, AUTH_ERROR } from './useChatSession'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { useChatSession, useChatPanelSession, TRANSPORT_ERROR, AUTH_ERROR, REQUEST_ERROR } from './useChatSession'
 import { SCOPE_ALL } from '#shared/utils/chat-scope'
 
 /**
@@ -37,6 +37,7 @@ function sse(...chunks: object[]) {
   return chunks.map(c => `data: ${JSON.stringify(c)}\n\n`).join('') + 'data: [DONE]\n\n'
 }
 
+beforeEach(() => { vi.stubGlobal('csrfToken', async () => 'browser-token') })
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('useChatSession', () => {
@@ -66,6 +67,16 @@ describe('useChatSession', () => {
     expect(session.needsAuth.value).toBe(false)
   })
 
+  it('words a refused turn as the request\'s fault, not as an outage', async () => {
+    serve(400, '{"error":"Message role \\"system\\" is not accepted; a message must be \\"user\\" or \\"assistant\\"."}')
+    const session = useChatSession()
+
+    await session.chat.sendMessage({ text: 'Who owns onboarding?' })
+
+    expect(session.error.value).toBe(REQUEST_ERROR)
+    expect(session.needsAuth.value).toBe(false)
+  })
+
   it('words an unreachable endpoint as a sentence, not as "Failed to fetch"', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
     const session = useChatSession()
@@ -74,6 +85,14 @@ describe('useChatSession', () => {
 
     expect(session.error.value).toBe(TRANSPORT_ERROR)
     expect(session.needsAuth.value).toBe(false)
+  })
+
+  it('sends the CSRF token with the turn', async () => {
+    const fetch = serve(401, 'denied')
+    const session = useChatSession()
+    await session.chat.sendMessage({ text: 'Who owns onboarding?' })
+    const init = (fetch.mock.calls[0] as unknown as [unknown, RequestInit])[1]
+    expect(new Headers(init.headers).get('x-csrf-token')).toBe('browser-token')
   })
 
   // Stopping mid-turn must leave no alert behind: it is not an outage.

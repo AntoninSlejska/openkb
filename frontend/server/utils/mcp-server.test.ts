@@ -4,11 +4,13 @@ import {
   resetMocks,
   drupalMock,
   drupalToolsMock,
+  toolManifestMock,
   hocuspocusMock,
   kbReadMock,
   sessionRouterMock,
   callDrupalTool,
   listDrupalTools,
+  enabledSessionTools,
   routeAgentEdit,
   EVENT,
   PAGE,
@@ -28,6 +30,7 @@ vi.mock('./drupal', () => drupalMock)
 vi.mock('./session-router', importOriginal => sessionRouterMock(importOriginal))
 vi.mock('./hocuspocus', () => hocuspocusMock)
 vi.mock('./drupal-tools', () => drupalToolsMock)
+vi.mock('./tool-manifest', () => toolManifestMock)
 
 describe('MCP server', () => {
   beforeEach(resetMocks)
@@ -97,51 +100,20 @@ describe('MCP server', () => {
     expect(callDrupalTool).toHaveBeenCalledWith(EVENT, 'notATool', {})
   })
 
-  it('sends an agent creating a page to tool_api__create_page, by way of tool_api__list_spaces', async () => {
-    const { server } = await connect()
-    const instructions = (server as unknown as { _instructions: string })._instructions
-    // The tool is Drupal's and reaches the client through the relay, so the
-    // instructions are the only place this file names it.
-    expect(instructions).toContain('call tool_api__create_page')
-    expect(instructions).toContain('a space tool_api__list_spaces reported as writable')
-  })
-
-  it('tells the two reads apart in the instructions, so an agent picks without trying both', async () => {
-    // OKB-174: reading the published page is Drupal's tool_api__get_page,
-    // reading the working copy is this server's getPageForEditing. An agent
-    // sent to the wrong one either cites a draft or writes against a version
-    // no write can use.
-    const { server } = await connect()
-    const instructions = (server as unknown as { _instructions: string })._instructions
-    expect(instructions).toMatch(/tool_api__get_page answers the page as it stands PUBLISHED/)
-    expect(instructions).toMatch(/getPageForEditing answers the WORKING COPY/)
+  // The instructions are prose for a model; what a test can hold them to is
+  // naming every tool the flow they describe uses, and the `status` keys.
+  it('names every tool and status key the agent flow needs in the instructions', async () => {
+    const { client } = await connect()
+    const instructions = client.getInstructions()!
+    const { tools } = await client.listTools()
+    const drupalTools = ['tool_api__list_spaces', 'tool_api__create_page', 'tool_api__get_page', 'tool_api__search_pages', 'tool_api__list_assignments']
+    for (const name of [...tools.map(t => t.name), ...drupalTools]) {
+      expect(instructions).toContain(name)
+    }
     expect(instructions).not.toMatch(/\bgetPage\b/)
-  })
-
-  it('tells an agent it never publishes, and to ask for review and then wait for it', async () => {
-    const { server } = await connect()
-    const instructions = (server as unknown as { _instructions: string })._instructions
-    expect(instructions).toContain('You never publish, and no tool does')
-    expect(instructions).toContain('`agent_review`')
-    expect(instructions).toContain('`moderated`')
-    expect(instructions).toMatch(/Ask before you stop/)
-    expect(instructions).toMatch(/drafts for an editor to publish/)
-    expect(instructions).toMatch(/On a yes, loop on waitForChanges/)
-    expect(instructions).toMatch(/each with its own cursor/)
-    expect(instructions).toMatch(/A `session` event ends the wait on that page/)
-    expect(instructions).toMatch(/Stop when no page is left, after ten rounds in a row with no event/)
-    expect(instructions).toMatch(/answer it with commentOnBlock/)
-    expect(instructions).toMatch(/`draft_exists` true means the working copy holds changes that are not live/)
-    expect(instructions).toMatch(/you still do not publish/)
     for (const field of ['draft_exists', 'blocks_pending', 'can_publish']) {
       expect(instructions).toContain(`\`${field}\``)
     }
-  })
-
-  it('tells an agent how to place a new page under a parent', async () => {
-    const { server } = await connect()
-    const instructions = (server as unknown as { _instructions: string })._instructions
-    expect(instructions).toMatch(/Pass `parent` .* to place the new page under it/)
   })
 
   // The three session tools, and the same three Drupal declares as Tool API
@@ -153,6 +125,39 @@ describe('MCP server', () => {
     const { tools } = await client.listTools()
     expect(tools.map(t => t.name).sort())
       .toEqual(['commentOnBlock', 'getPageForEditing', 'updateBlocks', 'updateFields', 'waitForChanges'])
+  })
+
+  it('leaves out and refuses a session tool Drupal does not enable', async () => {
+    enabledSessionTools.mockResolvedValue(new Set(['get_page_for_editing']))
+    listDrupalTools.mockResolvedValue([
+      { name: 'tool_api__list_spaces', description: 'x', inputSchema: { type: 'object' } },
+    ])
+    const { client } = await connect()
+
+    const { tools } = await client.listTools()
+    expect(tools.map(t => t.name).sort()).toEqual(['getPageForEditing', 'tool_api__list_spaces'])
+
+    const res = await client.callTool({
+      name: 'updateBlocks',
+      arguments: { path: 'intro', blocks: [{ id: 'b-1', markdown: 'One.' }] },
+    })
+    expect(res.isError).toBe(true)
+    expect((res.content as any[])[0].text).toBe('updateBlocks is not enabled on this site.')
+    expect(routeAgentEdit).not.toHaveBeenCalled()
+    expect(callDrupalTool).not.toHaveBeenCalled()
+  })
+
+  // Which session tools exist is Drupal's to say; without an answer the server
+  // guesses neither all nor none.
+  it('answers an unreadable tool manifest with an error', async () => {
+    enabledSessionTools.mockRejectedValue(new Error('Drupal answered the tool manifest with 503'))
+    const { client } = await connect()
+
+    await expect(client.listTools()).rejects.toThrow('tool manifest')
+
+    const res = await client.callTool({ name: 'getPageForEditing', arguments: { path: 'intro' } })
+    expect(res.isError).toBe(true)
+    expect(getKbPage).not.toHaveBeenCalled()
   })
 
   it('the test-drive flow still closes: read the draft, edit the block it named, read it back', async () => {

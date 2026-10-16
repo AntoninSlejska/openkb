@@ -23,13 +23,6 @@ vi.mock('h3', async (importOriginal) => {
   return { ...actual, readRawBody: (...a: unknown[]) => readRawBody(...a) }
 })
 
-vi.mock('../../utils/actor', () => ({
-  forwardedAuthHeaders: (event: H3Event) => {
-    const cookie = event.node.req.headers.cookie
-    return cookie ? { Cookie: cookie } : {}
-  },
-}))
-
 const handler = (await import('./[...path]')).default as unknown as
   (event: H3Event) => Promise<unknown>
 
@@ -102,16 +95,25 @@ describe('/api/drupal/[...path]', () => {
     expect(await statusOf(handler(event(undefined, { path: 'user/1' })))).toBe(404)
     // A `..` segment resolves past the prefix at Drupal, so it is refused here.
     expect(await statusOf(handler(event(undefined, { path: 'openkb/../user/1' })))).toBe(404)
+    expect(await statusOf(handler(event(undefined, { path: 'openkb/%2e%2e/user/1' })))).toBe(404)
     expect(fetchUpstream).not.toHaveBeenCalled()
   })
 
-  it('refuses a write that carries no CSRF token', async () => {
+  it('re-encodes the decoded router param, so `fetch` resolves no `..`', async () => {
+    await handler(event(undefined, { path: 'openkb/.\t./.\t./user/1' }))
+    expect(fetchUpstream).toHaveBeenCalledWith('http://drupal.test/openkb/.%09./.%09./user/1', expect.anything())
+  })
+
+  it('forwards a Bearer write without a CSRF token, and without the cookie', async () => {
     const write = event(
-      { cookie: 'SESS=1', accept: JSON_ACCEPT, 'content-type': JSON_ACCEPT },
+      { cookie: 'SESS=1', authorization: 'Bearer agent-1', accept: JSON_ACCEPT, 'content-type': JSON_ACCEPT },
       { method: 'POST', path: 'openkb/node/7/space' },
     )
-    expect(await statusOf(handler(write))).toBe(403)
-    expect(fetchUpstream).not.toHaveBeenCalled()
+    await handler(write)
+    const { headers } = fetchUpstream.mock.calls[0]![1] as { headers: Record<string, string> }
+    expect(headers.Authorization).toBe('Bearer agent-1')
+    expect(headers.Cookie).toBeUndefined()
+    expect(headers['X-CSRF-Token']).toBeUndefined()
   })
 
   it('forwards the CSRF token a write carries', async () => {

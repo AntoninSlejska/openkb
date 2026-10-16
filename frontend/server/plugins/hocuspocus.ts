@@ -22,15 +22,18 @@ import { initProseMirrorDoc } from '@tiptap/y-tiptap'
 import type { Node as ProseNode } from '@tiptap/pm/model'
 import { editorSchema } from '../utils/editor-schema'
 import { readBlockMeta } from '#shared/page-blocks'
-import { pruneComments } from '#shared/block-comments'
-import { commentRecords, commentsSynced, type StoredConversations } from '../utils/collab-comments'
+import { commentsRoot, pruneComments } from '#shared/block-comments'
+import { commentRecords, commentsSynced, stampCommentAuthors, type StoredConversations } from '../utils/collab-comments'
 import { mapCeFieldValues, TITLE_KEY, type FieldValues } from '../utils/entity-fields'
 import { CheckpointScheduler } from '../utils/commit-scheduler'
+import { TtlCache } from '../utils/ttl-cache'
 import { settleDocument, unloadMayRelease, type CollabControl, type CollabControlDeps, type SettleableDocument } from '../utils/collab-control'
 import { COLLAB_COMMIT_MAX_DIRTY_MS, COLLAB_COMMIT_QUIET_MS, COLLAB_MARK_THROTTLE_MS } from '../utils/collab-timing'
 import { MarkMirror } from '../utils/collab-sidecar'
 import { noEditAccessReason, noFieldAccessReason } from '#shared/utils/collab-auth'
 import { joinAccessUrl, parseJoinAnswer, type JoinAccount } from '../utils/collab-join'
+import { isCrossSiteRequest } from '../utils/cross-site'
+import { isSessionCsrfToken } from '../utils/csrf'
 
 /**
  * Collaboration server.
@@ -183,7 +186,7 @@ export default defineNitroPlugin((nitroApp) => {
 
   mkdirSync(dirname(SQLITE_PATH), { recursive: true })
 
-  const editPermCache = new Map<string, { access: JoinAccess, expiresAt: number }>()
+  const editPermCache = new TtlCache<string, JoinAccess>(CACHE_TTL_MS)
   // One read of a node's working copy, shared by every lane of the seed pass
   // that follows it (see WORKING_COPY_MEMO_MS). Holds the in-flight promise, so
   // concurrent lanes share the request rather than merely its result.
@@ -385,10 +388,10 @@ export default defineNitroPlugin((nitroApp) => {
       console.warn(`[collab] ${documentName}: conversations not stated — the document was never seeded from Drupal`)
       return
     }
-    const records = commentRecords(doc)
-    const stated = JSON.stringify(records)
-    if (statedComments.get(documentName) === stated) return
     try {
+      const records = commentRecords(doc)
+      const stated = JSON.stringify(records)
+      if (statedComments.get(documentName) === stated) return
       await asCollabServer(auth => putInlineComments(auth, 'node', nid, records))
       statedComments.set(documentName, stated)
     }
@@ -423,8 +426,8 @@ export default defineNitroPlugin((nitroApp) => {
   ): Promise<JoinAccess & { reachable: boolean }> {
     const key = cacheKey(cookie, nid)
     const hit = editPermCache.get(key)
-    if (!fresh && hit && hit.expiresAt > Date.now()) {
-      return { ...hit.access, reachable: true }
+    if (!fresh && hit) {
+      return { ...hit, reachable: true }
     }
 
     const headers: Record<string, string> = { Accept: 'application/json' }
@@ -451,7 +454,7 @@ export default defineNitroPlugin((nitroApp) => {
       return { allowed: false, denied: null, user: null, reachable: false }
     }
 
-    editPermCache.set(key, { access, expiresAt: Date.now() + CACHE_TTL_MS })
+    editPermCache.set(key, access)
     return { ...access, reachable: true }
   }
 
@@ -566,6 +569,17 @@ export default defineNitroPlugin((nitroApp) => {
     document.getMap('fields').observe((_event, transaction) => {
       const writer = writerOfOrigin(transaction.origin)
       if (writer) ledger.fieldWriters.set(writerKey(writer), writer)
+    })
+
+    // A message is filed under whoever wrote it, not whoever it names. Seeds
+    // and this server's own writes carry no origin and are Drupal's word.
+    commentsRoot(document).observe((event, transaction) => {
+      if (!isPeerUpdate(transaction.origin) && !isAgentOrigin(transaction.origin)) return
+      const writer = writerOfOrigin(transaction.origin)
+      stampCommentAuthors(event, writer && {
+        ...writer,
+        name: (isAgentOrigin(transaction.origin) ? transaction.origin.seat?.name : ledger.peers.get(writer.uid)?.name) ?? null,
+      })
     })
 
     // The starting point, when it is knowable now. Three states, not two:
@@ -838,26 +852,22 @@ export default defineNitroPlugin((nitroApp) => {
         throw new Error(`Invalid node id in document name: ${documentName}`)
       }
 
-      // A credential the client hands in is a credential the client chose.
-      // Identity here is derived, never declared: the handshake is an ordinary
-      // HTTP request on the app origin, so the HttpOnly session cookie rides it
-      // on its own and no script can read it, substitute it, or borrow
-      // somebody else's. Anything arriving in the handshake payload instead —
-      // an agent's Bearer token above all — is refused: the socket seats only
-      // writers this server derived an identity for. It is not a rule about
-      // agents. An agent is a CRDT peer like any other, joined in-process
-      // through the agent adapter, where the session router admits it and its
-      // ops carry their own attributed origin (ADR 0003).
-      if (token) {
-        const reason = 'This editing session takes the browser session only; agent credentials join through the agent API.'
-        throw Object.assign(new Error(reason), { reason })
+      // Identity is derived, never declared: it comes from the HttpOnly
+      // session cookie, which no script can read or substitute. The handshake
+      // token is the session's CSRF token (ADR 0019), never a credential: an
+      // agent's Bearer token is refused, agents join in-process (ADR 0003).
+      const headers = new Headers(requestHeaders as unknown as HeadersInit)
+      // The cookie rides any handshake the browser opens, a foreign page's too.
+      if (isCrossSiteRequest(headers)) {
+        throw new Error(`Cross-site handshake from ${headers.get('origin')}`)
       }
-      const rh = requestHeaders as unknown as (Headers | Record<string, string>)
-      const cookie = (typeof (rh as Headers)?.get === 'function'
-        ? (rh as Headers).get('cookie')
-        : (rh as Record<string, string>)?.cookie) || ''
+      const cookie = headers.get('cookie') || ''
       if (!cookie) {
         throw new Error('Authentication required: no session cookie')
+      }
+      if (!await isSessionCsrfToken(cookie, token)) {
+        const reason = 'This editing session takes the browser session with its CSRF token only.'
+        throw Object.assign(new Error(reason), { reason })
       }
 
       const { allowed, denied, user, reachable } = await canEdit(nid, cookie)
@@ -1008,6 +1018,8 @@ export default defineNitroPlugin((nitroApp) => {
       // is measured against, and its checkpoint has no captured session to
       // re-verify before making the burst durable.
       if (!unloadMayRelease(unloadedAt, claims.get(documentName) ?? 0)) return
+      scheduler.stop(documentName)
+      editPermCache.sweep()
       ledgers.delete(documentName)
       markMirror.stop(documentName)
       sessionContext.delete(documentName)

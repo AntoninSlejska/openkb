@@ -16,8 +16,8 @@ import { refused, type JsonSchema, type KbTool, type ToolContext, type ToolResul
  *
  * These are the tools ADR 0009 puts in the frontend server, because they
  * interact with the live editing session. Drupal declares the same set as
- * Tool API plugins (`openkb_tools`) and offers them from neither of its
- * consumers, since it cannot execute them.
+ * Tool API plugins (`openkb_tools`) and enables each with an
+ * `mcp_tool_config`; the MCP server offers only the enabled ones.
  *
  * The frontmatter exposure contract arrives raw and is stripped of its
  * form-rendering hints here: what the tool surface exposes is the tools'
@@ -103,7 +103,10 @@ export const KB_INSTRUCTIONS
     + 'which your first updateBlocks replaces. Pass `parent` (a page path of '
     + 'the same space) to place the new page under it in the page tree. Use '
     + 'tool_api__search_pages to '
-    + 'find pages. When you connect, call tool_api__list_assignments: it '
+    + 'find pages. To find out what a page used to say, list its revisions '
+    + 'with tool_api__list_revisions, read every version of one block with '
+    + 'tool_api__get_block_history, and find the revision a wording was added '
+    + 'or removed in with tool_api__search_history. When you connect, call tool_api__list_assignments: it '
     + 'answers the comment threads people handed to you while you were away. '
     + 'There are two reads and they are not interchangeable: '
     + 'tool_api__get_page answers the page as it stands PUBLISHED — that is '

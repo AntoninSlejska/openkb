@@ -21,11 +21,15 @@ import {
   markdownOverrideExtensions,
 } from './nodes/markdown-overrides'
 import CalloutNodeView from '../components/CalloutNodeView.vue'
+import CodeBlockNodeView from '../components/CodeBlockNodeView.vue'
 import ImageNodeView from '../components/ImageNodeView.vue'
 import InfoboxNodeView from '../components/InfoboxNodeView.vue'
 import { CaretMemory } from './cite-insert'
 import { CiteNumbers } from './cite-numbers'
+import { codeHighlightPlugin } from './code-highlight'
 import { DocLinkSelection } from './doc-link-selection'
+import { LinkOpen } from './link-open'
+import { LinkTargetKeys } from './link-target'
 import { SelectionKeydownSync } from './selection-sync'
 
 /**
@@ -52,6 +56,7 @@ export const starterKitMarkdownOverrides = {
  * (StarterKit + image + horizontal-rule + code):
  *
  * - Callout / Infobox NodeViews for the ::fence components.
+ * - The code block's NodeView (language picker) and its highlighting.
  * - GFM tables + task lists — comark parses both, so the schema must
  *   carry them or an edit+save destroys the content (round-trip corpus
  *   in test/roundtrip/ enforces this).
@@ -76,6 +81,8 @@ export function buildEditorExtensions() {
     SelectionKeydownSync,
     CaretMemory,
     DocLinkSelection,
+    LinkOpen,
+    LinkTargetKeys,
     CiteNumbers,
     BlockId,
     BlockWrapper,
@@ -97,7 +104,14 @@ export function buildEditorExtensions() {
     OkbCite,
     OkbDocLink,
     OkbMention,
-    OkbCodeBlock,
+    OkbCodeBlock.extend({
+      addNodeView() {
+        return VueNodeViewRenderer(CodeBlockNodeView)
+      },
+      addProseMirrorPlugins() {
+        return [...(this.parent?.() ?? []), codeHighlightPlugin(this.name)]
+      },
+    }),
     OkbHardBreak,
     OkbHeading,
     OkbLink.configure({ openOnClick: false }),

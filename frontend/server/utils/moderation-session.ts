@@ -62,7 +62,13 @@ export async function checkpointLiveDocument(
 ): Promise<CheckpointOutcome> {
   if (!hp.documents.get(docName)) return { blocked: false }
 
-  const result = await useCheckpoint()(docName, 'manual', await requestIdentity(event))
+  // A cookie Drupal rejected names nobody: refuse before a revision is minted.
+  const identity = await requestIdentity(event)
+  if (!identity.token && !identity.uid) {
+    return { blocked: true, statusCode: 401, message: 'Authentication required — log in via /user/login' }
+  }
+
+  const result = await useCheckpoint()(docName, 'manual', identity)
 
   switch (result.outcome) {
     case 'committed':

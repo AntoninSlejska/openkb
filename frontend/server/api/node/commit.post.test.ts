@@ -16,7 +16,7 @@ vi.mock('../../utils/hocuspocus', () => ({
 // to.
 const drupalRead = vi.fn<() => Promise<unknown>>()
 vi.mock('../../utils/drupal', () => ({
-  drupalFetchWithCookie: (...args: unknown[]) => drupalRead(...args as []),
+  drupalFetchWithAuth: (...args: unknown[]) => drupalRead(...args as []),
 }))
 // The cookie names the caller; the checkpoint that follows states them and is
 // performed as them, so the handler resolves the account before it commits.

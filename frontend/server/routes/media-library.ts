@@ -1,2 +1,5 @@
-// Media-library dialog passthrough — see server/utils/drupal-proxy.ts.
-export default defineEventHandler(event => proxyToDrupal(event))
+import { defineEventHandler } from 'h3'
+import { drupalPassthrough } from '../utils/drupal-proxy'
+
+// Media-library dialog passthrough.
+export default defineEventHandler(event => drupalPassthrough(event, 'media-library'))

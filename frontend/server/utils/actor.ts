@@ -54,8 +54,10 @@ export function forwardedAuthHeaders(event: H3Event): Record<string, string> {
     return { Authorization: authorization }
   }
   const cookie = getHeader(event, 'cookie')
-  if (cookie) return { Cookie: cookie }
-  return {}
+  if (!cookie) return {}
+  // The browser's own CSRF token rides with its cookie (ADR 0019).
+  const csrf = getHeader(event, 'x-csrf-token')
+  return csrf ? { Cookie: cookie, 'X-CSRF-Token': csrf } : { Cookie: cookie }
 }
 
 /**

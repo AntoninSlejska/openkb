@@ -14,6 +14,7 @@ import { answered, refused, type JsonSchema, type KbTool } from './types'
 export function getPageForEditingTool(frontmatterSchema: JsonSchema): KbTool {
   return {
     name: 'getPageForEditing',
+    manifestName: 'get_page_for_editing',
     description:
       "Read a knowledge-base page's WORKING COPY by path — the revision "
       + 'updateFields and updateBlocks write, including edits a live editing '

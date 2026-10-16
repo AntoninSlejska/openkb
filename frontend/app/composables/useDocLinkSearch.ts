@@ -31,8 +31,17 @@ export interface DocLinkItem {
 
 interface SearchHit { id: string, title: string, path: string }
 
-/** One page as the picker reads it — its words, and its blocks' versions. */
-interface Page { title: string, body: string, versions: Record<string, string> }
+/** One page as the picker reads it — its words, alias, and its blocks' versions. */
+interface Page { title: string, path: string, body: string, versions: Record<string, string> }
+
+/** A page link or citation's target, as the link bubble shows it. */
+export interface ResolvedTarget {
+  title: string
+  path: string
+  /** The block's opening words, when the target names a block that exists. */
+  blockLabel: string | null
+  versions: Record<string, string>
+}
 
 /** How much of a block's own text a row is labelled with. */
 const LABEL_LIMIT = 60
@@ -79,10 +88,11 @@ export function useDocLinkSearch() {
 
   let abort: AbortController | null = null
   let timer: ReturnType<typeof setTimeout> | null = null
-  // Cached per nid: the block rows re-read it as the query is refined.
-  const fetched = new Map<number, Promise<Page>>()
+  // Cached per nid: the block rows re-read it as the query is refined. Null
+  // for a page this reader cannot resolve.
+  const fetched = new Map<number, Promise<Page | null>>()
 
-  function fetchPage(nid: number, signal?: AbortSignal): Promise<Page> {
+  function fetchPage(nid: number, signal?: AbortSignal): Promise<Page | null> {
     let pending = fetched.get(nid)
     if (!pending) {
       pending = $fetch<Partial<Page>>(`/api/node/${nid}`, {
@@ -90,11 +100,12 @@ export function useDocLinkSearch() {
         signal,
       }).then(found => ({
         title: found.title ?? '',
+        path: found.path ?? '',
         body: found.body ?? '',
         versions: found.versions ?? {},
       })).catch(() => {
         fetched.delete(nid)
-        return { title: '', body: '', versions: {} }
+        return null
       })
       fetched.set(nid, pending)
     }
@@ -107,7 +118,19 @@ export function useDocLinkSearch() {
     // Only a page the chrome's list has not seen yet needs a read.
     const known = titleByPath.value[item.path]
     if (known) return known
-    return (await fetchPage(item.nid)).title || item.label
+    return (await fetchPage(item.nid))?.title || item.label
+  }
+
+  /** A page link or citation's target, or null when this reader cannot resolve it. */
+  async function resolveTarget(nid: number, block: string | null): Promise<ResolvedTarget | null> {
+    const page = await fetchPage(nid)
+    if (!page) return null
+    return {
+      title: titleByPath.value[page.path] ?? page.title,
+      path: page.path,
+      blockLabel: block ? docBlocks(page.body).find(item => item.id === block)?.label ?? null : null,
+      versions: page.versions,
+    }
   }
 
   async function searchPages(query: string, signal: AbortSignal): Promise<Array<SearchHit & { nid: number }>> {
@@ -146,9 +169,9 @@ export function useDocLinkSearch() {
         }
         const page = hits[0]
         if (!page) { docItems.value = []; return }
-        const { body, versions } = await fetchPage(page.nid, signal)
+        const found = await fetchPage(page.nid, signal)
         if (signal.aborted) return
-        docItems.value = docBlocks(body)
+        docItems.value = docBlocks(found?.body ?? '')
           .filter(block => block.label.toLowerCase().includes(blockQuery))
           .map(block => ({
             label: block.label,
@@ -159,12 +182,12 @@ export function useDocLinkSearch() {
             block: block.id,
             // What a citation of this block is made against; the server derives
             // it off the same canonical body a read of the page serves.
-            v: versions[block.id] ?? null,
+            v: found?.versions[block.id] ?? null,
           }))
       }
       catch { /* aborted or network */ }
     }, DEBOUNCE_MS)
   }
 
-  return { docItems, searchDocs, docLabel }
+  return { docItems, searchDocs, docLabel, resolveTarget }
 }

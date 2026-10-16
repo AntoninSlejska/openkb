@@ -108,7 +108,7 @@ export function useDrupalCommitState(opts: CommitStateOptions) {
       // The server serializes the live Y.Doc and PATCHes Drupal, then writes
       // drupal_changed / last_save_at / last_commit into `_meta` — which the
       // observer above mirrors to every peer. We only reflect our own outcome.
-      const res = await $fetch<{ nid: number, ok: boolean, committed: boolean, changed?: number }>(
+      const res = await csrfFetch<{ nid: number, ok: boolean, committed: boolean, changed?: number }>(
         `/api/node/${nid}/commit`,
         { method: 'POST' },
       )

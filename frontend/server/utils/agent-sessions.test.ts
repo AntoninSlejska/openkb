@@ -45,6 +45,22 @@ describe('the session registry', () => {
     expect(held.leave).not.toHaveBeenCalled()
   })
 
+  it('closes a session the key already held instead of orphaning it', async () => {
+    vi.useFakeTimers()
+    const displaced = stub()
+    const newcomer = stub()
+    holdAgentSession('k', displaced)
+    await holdAgentSession('k', newcomer)
+
+    expect(displaced.persist).toHaveBeenCalledOnce()
+    expect(displaced.leave).toHaveBeenCalledOnce()
+    expect((await heldAgentSession('k'))?.session).toBe(newcomer.session)
+
+    // The displaced session's idle timer must not lapse the newcomer early.
+    await vi.advanceTimersByTimeAsync(AGENT_SESSION_IDLE_MS - 1)
+    expect(newcomer.leave).not.toHaveBeenCalled()
+  })
+
   it('holds nothing for a key nobody opened', async () => {
     expect(await heldAgentSession('nobody')).toBeNull()
   })

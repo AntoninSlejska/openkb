@@ -35,8 +35,8 @@ export default defineNuxtConfig({
   },
 
   // app/editor/components/* are auto-imported alongside the default
-  // app/components/* tree, prefixed `Editor` (so LiveSyncChip.vue
-  // resolves as <EditorLiveSyncChip />). Keeps everything editor-related
+  // app/components/* tree, prefixed `Editor` (so PresenceAvatars.vue
+  // resolves as <EditorPresenceAvatars />). Keeps everything editor-related
   // under app/editor/ without losing Nuxt's component auto-import.
   components: [
     { path: '~/components/chrome', prefix: 'Chrome' },
@@ -87,15 +87,18 @@ export default defineNuxtConfig({
     drupalBaseUrl,
     // The CE-API ships in explicit format: {element, props, slots}.
     customElementJsonFormat: 'explicit',
-    // Both left at the module defaults, because the user menu is Drupal's
-    // `account` menu rather than a menu this app writes: `menuEndpoint`
-    // reaches rest_menu_items (lupus_decoupled_menu), and the session cookie
-    // has to ride along on the SSR fetches. The account menu is per-session —
-    // it says "Log in" or "Log out" depending on who is asking, and the logout
-    // item carries that session's CSRF token — and the logout link itself is
-    // an ordinary page fetch through this proxy, which only ends a session
+    // `menuEndpoint` stays at the module default, because the user menu is
+    // Drupal's `account` menu rather than a menu this app writes: it reaches
+    // rest_menu_items (lupus_decoupled_menu). The session cookie has to ride
+    // along on the SSR fetches. The account menu is per-session — it says
+    // "Log in" or "Log out" depending on who is asking, and the logout item
+    // carries that session's CSRF token — and the logout link itself is an
+    // ordinary page fetch through this proxy, which only ends a session
     // Drupal can see. Anonymous CE reads would answer both with the signed-out
     // menu and a 403.
+    // X-Forwarded-For rides along so Drupal's login flood keys on the client
+    // when the sign-in and password-reset forms are relayed, not on this server.
+    fetchProxyHeaders: ['cookie', 'x-forwarded-for'],
     // The media-library dialog's form submits (selection, upload), views AJAX
     // and its Grid/Table display links are urlencoded/multipart POSTs served
     // by our own Drupal proxy (server/utils/drupal-proxy.ts) — keep the
@@ -127,6 +130,14 @@ export default defineNuxtConfig({
   nitro: {
     experimental: {
       websocket: true,
+    },
+    // Drupal's CSRF token per session (server/utils/csrf.ts). Bounded, in
+    // memory only, also in dev.
+    storage: {
+      'csrf-token': { driver: 'lru-cache', max: 10000, ttl: 30 * 60 * 1000 },
+    },
+    devStorage: {
+      'csrf-token': { driver: 'lru-cache', max: 10000, ttl: 30 * 60 * 1000 },
     },
     imports: {
       // Nitro auto-imports every export under server/utils. The MCP suites'

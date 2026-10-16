@@ -28,7 +28,8 @@ const DROP_PROPS = new Set(['$', 'class', 'id', 'disabled', 'style'])
 const INLINE_HTML_UNWRAP = new Set(['kbd', 'abbr', 'ins', 'sub', 'sup', 'mark', 'span'])
 
 export async function normalizedAst(markdown: string): Promise<unknown[]> {
-  const tree = await parseMarkdown(markdown, { plugins: [dataImages] })
+  // Complete documents, parsed as the read page does (see parseComark).
+  const tree = await parseMarkdown(markdown, { plugins: [dataImages], autoClose: false })
   return normalizeChildren(tree.nodes as ComarkNode[], false)
 }
 

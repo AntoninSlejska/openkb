@@ -40,9 +40,16 @@ const action = useRoute().fullPath
                is the question it asks — and the route's title otherwise, so the
                page is never without one. -->
           <h1
+            v-if="title"
             class="mb-6 text-[22px] font-bold leading-[1.2] tracking-tight text-highlighted sm:text-[26px]"
-            v-html="title || pageTitle"
+            v-html="title"
           />
+          <h1
+            v-else
+            class="mb-6 text-[22px] font-bold leading-[1.2] tracking-tight text-highlighted sm:text-[26px]"
+          >
+            {{ pageTitle }}
+          </h1>
 
           <form
             v-bind="attributes ?? {}"

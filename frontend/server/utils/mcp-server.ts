@@ -9,7 +9,8 @@ import {
 import { fetchFrontmatterSchema } from './drupal'
 import { callDrupalTool, listDrupalTools } from './drupal-tools'
 import { kbTools, runKbTool, KB_INSTRUCTIONS } from './mcp-tools'
-import type { KbTool, ToolResult } from './mcp-tools/types'
+import { enabledSessionTools } from './tool-manifest'
+import { refused, type KbTool, type ToolResult } from './mcp-tools/types'
 
 /**
  * The MCP server exposed at `/api/mcp` (see server/api/mcp.ts).
@@ -26,6 +27,10 @@ import type { KbTool, ToolResult } from './mcp-tools/types'
  * collaborative session and let the commit service persist, exactly as
  * `POST /api/agent/edit` and the `.md` PUT do. No local tool writes to Drupal
  * directly, and there is no path by which one could.
+ *
+ * Drupal decides which local tools are offered: one that its tool manifest
+ * (server/utils/tool-manifest.ts) does not list is left out of `tools/list`
+ * and refused on `tools/call`.
  *
  * The tools Drupal owns are relayed over its own MCP endpoint as this caller,
  * generically: no Drupal tool's name occurs here, so one added over there
@@ -96,12 +101,15 @@ export async function createMcpServer(event: H3Event): Promise<Server> {
     { capabilities: { tools: {} }, instructions: KB_INSTRUCTIONS },
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      ...localTools.map(toMcpTool),
-      ...(await listDrupalTools(event)).filter(tool => !localToolNames.has(tool.name)),
-    ],
-  }))
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const enabled = await enabledSessionTools()
+    return {
+      tools: [
+        ...localTools.filter(tool => enabled.has(tool.manifestName)).map(toMcpTool),
+        ...(await listDrupalTools(event)).filter(tool => !localToolNames.has(tool.name)),
+      ],
+    }
+  })
 
   server.setRequestHandler(CallToolRequestSchema, async (request): Promise<CallToolResult> => {
     const { name, arguments: args = {} } = request.params
@@ -111,6 +119,10 @@ export async function createMcpServer(event: H3Event): Promise<Server> {
       // relay blind to tool names, and what keeps an editing call off Drupal's
       // MCP endpoint.
       if (!localToolNames.has(name)) return await callDrupalTool(event, name, args)
+      const tool = localTools.find(candidate => candidate.name === name)!
+      if (!(await enabledSessionTools()).has(tool.manifestName)) {
+        return toCallToolResult(refused(`${name} is not enabled on this site.`))
+      }
       return toCallToolResult(await runKbTool(localTools, name, args, { event }))
     }
     catch (err) {

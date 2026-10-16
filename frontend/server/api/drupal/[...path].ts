@@ -2,11 +2,12 @@ import { defineEventHandler, getRouterParams, getQuery, getHeader, readRawBody, 
 import { drupalBaseUrl } from '../../utils/drupal'
 import { forwardedAuthHeaders } from '../../utils/actor'
 import { fetchUpstream, relaySetCookie, upstreamError } from '../../utils/upstream'
+import { drupalPath } from '../../utils/drupal-proxy'
 
 /**
  * Forwards the allowlisted Drupal API prefixes under the caller's own session
- * or token, JSON only, writes under Drupal's CSRF token; `/api/drupal-ce` does
- * the same for CE pages. No logic here.
+ * or token, JSON only, with the caller's own CSRF token (ADR 0019);
+ * `/api/drupal-ce` does the same for CE pages. No logic here.
  */
 
 /** The Drupal API prefixes this route forwards. */
@@ -21,19 +22,20 @@ function isJson(header: string | undefined): boolean {
 }
 
 /**
- * Whether the path is one this route serves. A `..` segment is refused rather
- * than resolved: `openkb/../user/1` passes any prefix test and reaches Drupal
- * as `/user/1`.
+ * The path to forward, if this route serves it: under an allowlisted prefix,
+ * through {@link drupalPath}, which refuses dot segments rather than resolving
+ * them — `openkb/../user/1` passes any prefix test and reaches Drupal as
+ * `/user/1`.
  */
-function forwardable(path: string): boolean {
-  return !path.split('/').includes('..')
-    && FORWARDED_PREFIXES.some(prefix => path.startsWith(prefix))
+function forwardable(param: string): string | undefined {
+  const path = drupalPath(param)
+  return path !== undefined && FORWARDED_PREFIXES.some(prefix => path.startsWith(prefix)) ? path : undefined
 }
 
 export default defineEventHandler(async (event) => {
   const params = getRouterParams(event).path ?? ''
-  const path = Array.isArray(params) ? params.join('/') : params
-  if (!forwardable(path)) {
+  const path = forwardable(Array.isArray(params) ? params.join('/') : params)
+  if (path === undefined) {
     throw createError({ statusCode: 404, statusMessage: 'Not Found' })
   }
 
@@ -46,11 +48,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const method = event.method
-  const csrf = getHeader(event, 'x-csrf-token')
   const reads = method === 'GET' || method === 'HEAD'
-  if (!reads && !csrf) {
-    throw createError({ statusCode: 403, statusMessage: 'A write needs a CSRF token' })
-  }
 
   const contentType = getHeader(event, 'content-type')
   const body = reads ? undefined : await readRawBody(event)
@@ -64,7 +62,6 @@ export default defineEventHandler(async (event) => {
     headers: {
       Accept: 'application/json',
       ...(body !== undefined && contentType ? { 'Content-Type': contentType } : {}),
-      ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
       ...auth,
     },
     body,

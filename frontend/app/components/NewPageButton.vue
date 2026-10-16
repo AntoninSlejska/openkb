@@ -96,7 +96,7 @@ async function create() {
   error.value = null
   titleError.value = null
   try {
-    const page = await $fetch<{ path: string, uuid: string }>('/api/kb', {
+    const page = await csrfFetch<{ path: string, uuid: string }>('/api/kb', {
       method: 'POST',
       body: { title: title.value.trim(), space: targetSpace.value, type: type.value },
     })
@@ -127,7 +127,7 @@ async function create() {
  */
 async function placeUnder(target: NestTarget, id: string) {
   try {
-    await $fetch(`/api/spaces/${target.slug}/outline`, {
+    await csrfFetch(`/api/spaces/${target.slug}/outline`, {
       method: 'PATCH',
       body: {
         outline: addChild(target.outline, target.parentId, id),

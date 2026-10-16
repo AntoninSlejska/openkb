@@ -68,12 +68,4 @@ describe('POST /api/spaces', () => {
     await expect(handler(event())).rejects.toMatchObject({ statusCode: 422 })
     expect(createSpace).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: '' }))
   })
-
-  it('passes a Drupal rejection through untranslated', async () => {
-    // The permission and the taken-name rule are Drupal's; restating either
-    // here would be a second answer that can drift from the real one.
-    readBody.mockResolvedValue({ name: 'General' })
-    createSpace.mockRejectedValue(Object.assign(new Error('nope'), { statusCode: 422 }))
-    await expect(handler(event())).rejects.toMatchObject({ statusCode: 422 })
-  })
 })

@@ -31,6 +31,8 @@ x-drupal-development:
       OPENKB_AUTO_BOOT: "0"
       # Development ini on top of the image's: docker/drupal/dev/php.ini.
       PHP_INI_SCAN_DIR: /usr/local/etc/php/conf.d:/app/docker/drupal/dev
+      # Every mail lands in mailpit unless .env names a real transport.
+      MAILER_DSN: ${MAILER_DSN:-smtp://mailpit:1025}
     volumes: !override
       - ${COMPOSE_APP_DIR:-.}:/app
       - ${COMPOSE_CACHE_DIR:-./.cache}/.composer/cache:/cache/composer
@@ -123,6 +125,12 @@ services:
       OPENSEARCH_JAVA_OPTS: -Xms256m -Xmx256m
       # A full disk on a shared host must not block index creation.
       cluster.routing.allocation.disk.threshold_enabled: "false"
+    labels:
+      - "lupus-ci.job_name=${LUPUS_CI_JOB_NAME:-}"
+
+  # Catches outgoing mail: SMTP on 1025, web UI and API on 8025.
+  mailpit:
+    image: axllent/mailpit:v1.27
     labels:
       - "lupus-ci.job_name=${LUPUS_CI_JOB_NAME:-}"
 

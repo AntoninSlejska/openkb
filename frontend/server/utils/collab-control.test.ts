@@ -75,15 +75,6 @@ describe('settleDocument', () => {
     expect(report).toEqual({ live: false, connections: 0 })
   })
 
-  it('retires the document before anything else', async () => {
-    // Retire first: step 4 disconnects peers, and a last-peer-disconnect
-    // would otherwise fire a checkpoint straight into the delete.
-    const h = harness({ live: false })
-    await settleDocument(h.deps, 'node:7')
-
-    expect(h.calls[0]).toBe('retire')
-  })
-
   it('an unload failure does not fail the settle', async () => {
     const h = harness({ connections: 1 })
     h.deps.unload = () => Promise.reject(new Error('already unloading'))

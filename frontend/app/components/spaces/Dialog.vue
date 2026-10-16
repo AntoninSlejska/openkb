@@ -81,7 +81,7 @@ async function submit() {
 }
 
 async function create() {
-  const space = await $fetch<{ id: string, slug: string }>('/api/spaces', {
+  const space = await csrfFetch<{ id: string, slug: string }>('/api/spaces', {
     method: 'POST',
     body: {
       name: name.value.trim(),
@@ -115,7 +115,7 @@ async function save(space: KbSpaceDetail) {
     return
   }
 
-  const updated = await $fetch<KbSpaceDetail>(`/api/spaces/${space.slug}`, { method: 'PATCH', body })
+  const updated = await csrfFetch<KbSpaceDetail>(`/api/spaces/${space.slug}`, { method: 'PATCH', body })
   open.value = false
   emit('updated', updated)
   // The description rides the space's own CE payload and the space cards.

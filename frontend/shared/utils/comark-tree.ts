@@ -28,6 +28,8 @@
  *   what it is given straight to the DOM.
  * - A component nobody has built becomes `unknown`, so a fence can never name
  *   an app component into the page.
+ * - With a highlighter, a `pre > code` fence becomes a `code-block` node
+ *   carrying its token lines (shared/utils/code-highlight.ts).
  * - Read path only: every id-bearing top-level block gets a ¶ link.
  *
  * {@link dataImages} widens the parser's `data:` check.
@@ -43,6 +45,8 @@ import {
   citeUrlTitle,
   type CiteState,
 } from '#shared/utils/citations'
+import type { CodeLine } from '#shared/utils/code-highlight'
+import { codeLanguage } from '#shared/utils/code-languages'
 
 /** What one attribute may carry: any value, or only the listed ones. */
 export type AttrRule = true | Record<string, true>
@@ -96,6 +100,11 @@ export interface BlockReferences {
   cites: string[]
   links: string[]
 }
+
+/** The tag a highlighted code fence renders under. See `CustomCodeBlock`. */
+export const CODE_BLOCK_TAG = 'code-block'
+
+export type CodeHighlighter = (code: string, info: string) => Promise<CodeLine[]>
 
 /** The tag an unbuilt component renders under. See `CustomDefault`. */
 export const UNKNOWN_TAG = 'unknown'
@@ -156,6 +165,8 @@ export interface TreeOptions {
    * renders as nothing: the index holds the page's words, not its chrome.
    */
   resolveCites?: CiteResolver
+  /** Tokenizes code fences. Without it a fence stays a plain `pre > code`. */
+  highlightCode?: CodeHighlighter
   /** See {@link withBlockLinks}. Read path only. */
   blockLinks?: boolean
   /**
@@ -172,6 +183,12 @@ export interface TreeOptions {
    * floor, so a page still renders.
    */
   allowedHtml?: AllowedHtml
+  /**
+   * The text is a partial chat answer: comark auto-closes open constructs.
+   * Off for a stored document, which is complete; there the auto-close only
+   * misreads markers, e.g. `**b***i*` gains a trailing `*****`.
+   */
+  streaming?: boolean
 }
 
 /** One markdown-it inline rule, as its ruler holds it. */
@@ -218,7 +235,7 @@ export async function markdownToTree(
   markdown: string,
   options: TreeOptions = {},
 ): Promise<ComarkNode[]> {
-  return cleanTree(await parseComark(markdown), options)
+  return cleanTree(await parseComark(markdown, options.streaming), options)
 }
 
 /**
@@ -228,12 +245,12 @@ export async function markdownToTree(
  * reads the reference nodes off: {@link cleanTree} renders a citation as a
  * chip and, with nothing to resolve it against, as nothing at all.
  */
-export async function parseComark(markdown: string): Promise<ComarkNode[]> {
+export async function parseComark(markdown: string, streaming = false): Promise<ComarkNode[]> {
   if (!markdown || !markdown.trim()) return []
   // Dynamic so the parser is its own chunk: the read page is handed a tree
   // the server already built, and only the chat surfaces parse in the browser.
   const { parseMarkdown } = await import('comark')
-  return dissolveBlockFences((await parseMarkdown(markdown, { plugins: [dataImages] })).nodes as ComarkNode[])
+  return dissolveBlockFences((await parseMarkdown(markdown, { plugins: [dataImages], autoClose: streaming })).nodes as ComarkNode[])
 }
 
 /** The passes {@link markdownToTree} runs, over a tree already parsed. */
@@ -259,7 +276,8 @@ export async function cleanTree(
     citationChips: options.citationChips,
     allowed: options.allowedHtml,
   }
-  const clean = cleanChildren(nodes, ctx, false)
+  let clean = cleanChildren(nodes, ctx, false)
+  if (options.highlightCode) clean = await withCodeBlocks(clean, options.highlightCode)
   return options.blockLinks ? withBlockLinks(clean) : clean
 }
 
@@ -497,6 +515,39 @@ function withBlockLinks(nodes: ComarkNode[]): ComarkNode[] {
     }, '¶']
     return [tag, props, ...children, link] as ComarkNode
   })
+}
+
+/**
+ * Every `pre > code` fence, at any depth, as a `code-block` node: the
+ * block id, the language and the token lines.
+ *
+ * `language` is set only for a language the highlighter knows, so the label
+ * never names one it did not colour.
+ */
+async function withCodeBlocks(nodes: ComarkNode[], highlight: CodeHighlighter): Promise<ComarkNode[]> {
+  return Promise.all(nodes.map(async (node) => {
+    if (typeof node === 'string') return node
+    const [tag, props, ...children] = node
+    const code = tag === 'pre' && children.length === 1 ? children[0] : undefined
+    if (!Array.isArray(code) || code[0] !== 'code') {
+      return [tag, props, ...await withCodeBlocks(children, highlight)] as ComarkNode
+    }
+    const text = collectText(code.slice(2) as ComarkNode[])
+    const info = fenceInfo(props, code[1])
+    const known = codeLanguage(info)
+    return [CODE_BLOCK_TAG, {
+      ...(typeof props.id === 'string' ? { id: props.id } : {}),
+      ...(known ? { language: known.id } : {}),
+      lines: await highlight(text, info),
+    }] as ComarkNode
+  }))
+}
+
+/** A fence's info string: the parser's `language` on the `pre`, else the `language-*` class. */
+function fenceInfo(pre: ComarkProps, code: ComarkProps): string {
+  if (typeof pre.language === 'string' && pre.language !== '') return pre.language
+  const cls = String(code.class ?? '').split(/\s+/).find(c => c.startsWith('language-'))
+  return cls ? cls.slice('language-'.length) : ''
 }
 
 /**

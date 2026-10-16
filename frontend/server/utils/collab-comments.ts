@@ -6,6 +6,7 @@ import {
   readThreads,
   recordOf,
   writeComments,
+  type CommentMessage,
   type CommentThread,
   type InlineCommentRecord,
 } from '#shared/block-comments'
@@ -38,6 +39,73 @@ export const META_NODE_UUID = 'node_uuid'
 
 /** Where the fact that Drupal has been read for this document is recorded. */
 const META_COMMENTS_SYNCED = 'comments_synced'
+
+/** Who wrote to the comments map, as this server knows it — never as the client says. */
+export interface CommentWriter {
+  uid: number
+  name: string | null
+  /** Agent client's label; null for a person. */
+  via: string | null
+}
+
+/** Whether a value is plain JSON data: no bigint, function, symbol or class instance anywhere in it. */
+function isJson(value: unknown): boolean {
+  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true
+  if (Array.isArray(value)) return value.every(isJson)
+  return typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype
+    && Object.values(value as object).every(isJson)
+}
+
+/** A plain JSON object — what a seeded or stamped message is. */
+function isRecord(value: unknown): value is CommentMessage {
+  return isJson(value) && !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+/** A value a peer may write to the comments map: a plain JSON object with a timestamp. */
+function isMessage(value: unknown): value is CommentMessage {
+  return isRecord(value) && typeof value.at === 'number'
+}
+
+/**
+ * Files what a write just did to the comments map under the writer behind it.
+ *
+ * The map is a buffer every peer writes, so the author a message carries is
+ * whatever its client said; the transaction's origin is what this server
+ * authenticated. For every key the write touched:
+ * - another account's message it deleted or overwrote is put back, with or
+ *   without a timestamp;
+ * - a value that is not a plain JSON message is removed;
+ * - a message naming another account, or with no writer to file it under, is
+ *   removed — a peer speaks for itself only;
+ * - otherwise the message gets the writer's uid, name and via.
+ */
+export function stampCommentAuthors(event: Y.YMapEvent<unknown>, writer: CommentWriter | null): void {
+  const root = event.target
+  const stamped = new Map<string, CommentMessage | null>()
+  for (const [key, change] of event.changes.keys) {
+    const old = change.oldValue as unknown
+    if (isRecord(old) && (!writer || old.uid !== writer.uid)) {
+      stamped.set(key, old)
+      continue
+    }
+    if (change.action === 'delete') continue
+    const value = root.get(key)
+    if (!isMessage(value) || !writer || (value.uid && value.uid !== writer.uid)) {
+      stamped.set(key, null)
+      continue
+    }
+    if (value.uid === writer.uid && (value.name ?? null) === writer.name && (value.via ?? null) === writer.via) continue
+    const { via: _via, ...message } = value
+    stamped.set(key, { ...message, uid: writer.uid, name: writer.name, ...(writer.via ? { via: writer.via } : {}) })
+  }
+  if (stamped.size === 0) return
+  root.doc!.transact(() => {
+    for (const [key, message] of stamped) {
+      if (message) root.set(key, message)
+      else root.delete(key)
+    }
+  })
+}
 
 /** The whole live map, as the API names it, oldest first. */
 export function commentRecords(doc: Y.Doc): InlineCommentRecord[] {

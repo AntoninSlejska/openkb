@@ -39,7 +39,7 @@ async function move() {
   submitting.value = true
   error.value = null
   try {
-    const result = await $fetch<{ space: { id: string, name: string } }>(
+    const result = await csrfFetch<{ space: { id: string, name: string } }>(
       `/api/node/${props.nid}/space`,
       { method: 'POST', body: { space: target.value } },
     )

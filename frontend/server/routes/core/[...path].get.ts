@@ -1,2 +1,5 @@
-// Media-library dialog passthrough, static assets only — see server/utils/drupal-proxy.ts.
-export default defineEventHandler(event => proxyStaticAsset(event))
+import { defineEventHandler } from 'h3'
+import { drupalPassthrough } from '../../utils/drupal-proxy'
+
+// Media-library dialog passthrough, static assets only.
+export default defineEventHandler(event => drupalPassthrough(event, 'core', { assets: true }))

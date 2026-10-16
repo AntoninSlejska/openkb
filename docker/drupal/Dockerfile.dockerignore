@@ -15,6 +15,7 @@ web/sites/*/files
 web/libraries
 web/modules/contrib
 recipes/lupus_decoupled_recipe
+recipes/ai_recipe_guardrails_prompt_safety
 web/profiles/contrib
 web/themes/contrib
 web/sites/simpletest

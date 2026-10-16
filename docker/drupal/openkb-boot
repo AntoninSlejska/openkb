@@ -10,14 +10,18 @@
 # exists. That marker is this container's own — only Caddy and this script read
 # it — so it lives in /run and not on the shared files volume, which carries the
 # site's private data. The lock does have to be shared: it makes one boot at a
-# time run across the containers on that volume. `.openkb-installed` is the
-# marker site-install.sh and site-update.sh write and the cron service reads;
-# nothing here writes it, so a failed install leaves none and the next boot
-# installs again.
+# time run across the containers on that volume. site-install.sh writes the
+# install markers on that volume:
+#  - `.openkb-installed`: the install finished,
+#  - `.openkb-installing`: an install started and did not finish, so the next
+#    boot installs over what it left in the database.
+# A non-empty database with neither marker is not this stack's site: the boot
+# installs nothing and the setup page stays up.
 cd /app || exit 1
 
 FILES_DIR=${PERSISTENT_FILES_DIR:-files}
 INSTALLED=$FILES_DIR/.openkb-installed
+INSTALLING=$FILES_DIR/.openkb-installing
 HOLDING=/run/openkb/.openkb-holding
 DRUSH="php -d memory_limit=512M ./vendor/drush/drush/drush.php"
 
@@ -51,16 +55,27 @@ if [ ! -f "$INSTALLED" ]; then
     echo "$TABLES" >&2
     exit 1
   fi
+  if [ -n "$TABLES" ] && [ ! -f "$INSTALLING" ]; then
+    echo "openkb-boot: THIS DATABASE IS NOT EMPTY, BUT NO OPENKB INSTALL FINISHED ON IT." >&2
+    echo "openkb-boot: nothing is installed over it and the setup page stays up. Then" >&2
+    echo "openkb-boot: restart the drupal service after one of these:" >&2
+    echo "openkb-boot:  - the site was installed and works: write the marker with" >&2
+    echo "openkb-boot:      docker compose exec drupal openkb-update" >&2
+    echo "openkb-boot:  - reinstall, which DESTROYS the site's content:" >&2
+    echo "openkb-boot:      docker compose exec drupal openkb-install" >&2
+    echo "openkb-boot:  - empty the database, and the boot installs the site." >&2
+    exit 1
+  fi
   if [ -n "$TABLES" ]; then
-    echo "openkb-boot: this database is not empty, so nothing is installed over it." >&2
+    echo "openkb-boot: an earlier install did not finish, installing over it."
   else
     echo "openkb-boot: no site on this database, installing it."
-    if ! ./scripts/site-install.sh; then
-      echo "openkb-boot: THE INSTALL FAILED — the output above says why." >&2
-      echo "openkb-boot: the stack keeps answering with the setup page. Fix the cause and" >&2
-      echo "openkb-boot: restart the drupal service, or start over with 'docker compose down -v'." >&2
-      exit 1
-    fi
+  fi
+  if ! ./scripts/site-install.sh; then
+    echo "openkb-boot: THE INSTALL FAILED — the output above says why." >&2
+    echo "openkb-boot: the stack keeps answering with the setup page. Fix the cause and" >&2
+    echo "openkb-boot: restart the drupal service, or start over with 'docker compose down -v'." >&2
+    exit 1
   fi
 fi
 

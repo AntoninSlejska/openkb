@@ -5,8 +5,10 @@
  *
  * Parsing is async and re-runs on every streamed chunk, so the tree is
  * watch-driven and sequence-guarded — a slow parse of an earlier chunk must not
- * overwrite a newer one. comark auto-closes an open construct, so a fence that
- * is still streaming is already the mounted component.
+ * overwrite a newer one. While `streaming`, comark auto-closes an open
+ * construct, so a fence that is still streaming is already the mounted
+ * component. The finished answer parses without that repair: on complete text
+ * it can add marks the answer does not have.
  */
 import { MarkdownDocument } from '@comark/vue'
 import { comarkComponents } from '~/comark/components'
@@ -18,6 +20,8 @@ const props = defineProps<{
   text: string
   /** The sources a bare `[n]` may be rendered as a clickable chip for. */
   citationChips?: readonly CitationChip[]
+  /** Whether more chunks are still to come. */
+  streaming?: boolean
 }>()
 
 const nodes = shallowRef<ComarkNode[]>([])
@@ -53,6 +57,12 @@ async function resolveMedia(uuids: string[]): Promise<Record<string, ResolvedMed
   return items
 }
 
+/** Loaded with the first fence an answer holds, so an answer without code ships no highlighter. */
+async function highlightCode(code: string, info: string) {
+  const { highlightToTokens } = await import('#shared/utils/code-highlight')
+  return highlightToTokens(code, info)
+}
+
 /** `MarkdownDocument` re-renders on `value` identity, so the document object
  * must stay stable across renders that did not change the tree. */
 const answer = computed(() => ({ nodes: nodes.value }))
@@ -63,12 +73,15 @@ watch([
   () => props.text,
   () => props.citationChips?.map(c => `${c.n}:${c.title}:${c.path}`).join(),
   allowedHtml,
+  () => props.streaming,
 ], async ([text]) => {
   const seq = ++latest
   const next = await markdownToTree(text, {
     resolveMedia,
+    highlightCode,
     citationChips: props.citationChips,
     allowedHtml: allowedHtml.value,
+    streaming: props.streaming,
   })
   if (seq === latest) nodes.value = next
 }, { immediate: true })
@@ -84,6 +97,6 @@ watch([
     class="okb-box-body okb-prose-compact"
     :value="answer"
     :components="comarkComponents"
-    streaming
+    :streaming="streaming"
   />
 </template>

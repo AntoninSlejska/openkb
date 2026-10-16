@@ -15,6 +15,7 @@ import {
   AgentOpsError,
   authorizeSessionWrite,
   drupalGateDeps,
+  joinAgentSession,
   routeAgentEdit,
   type WriteRefusal,
   type AgentIdentity,
@@ -276,6 +277,22 @@ describe('routeAgentEdit', () => {
     expect(deps.host.openDirectConnection).toHaveBeenCalledOnce()
     expect(Object.keys(second.applied.blocks)).toEqual([SEED_BLOCK])
     expect(serializeYDoc(doc)).toBe(`second {#${SEED_BLOCK}}`)
+  })
+
+  it('opens one session for parallel first calls of one credential', async () => {
+    const edit = (markdown: string) =>
+      routeAgentEdit(deps, { token: 'tok' }, { nid: 1, name: 'node 1' }, { blocks: [{ id: SEED_BLOCK, markdown }] })
+
+    const [joined] = await Promise.all([
+      joinAgentSession(deps, { token: 'tok' }, { nid: 1, name: 'node 1' }),
+      edit('first'),
+      edit('second'),
+    ])
+
+    expect(deps.host.openDirectConnection).toHaveBeenCalledOnce()
+    await closeAgentSessions({ persist: false })
+    expect(disconnect).toHaveBeenCalledOnce()
+    expect(joined.session.documentName).toBe('node:1')
   })
 
   it('never lets one credential onto another\'s session', async () => {

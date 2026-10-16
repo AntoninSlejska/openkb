@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { shippedAllowedHtml } from '~~/test/shipped-comark-format'
-import { citationsByBlock, markdownToTree, parseComark, referencesByBlock, liftTitleBlockId, COMPONENT_TAGS, HTML_ELEMENTS, type AllowedHtml, type ComarkNode } from './comark-tree'
+import { citationsByBlock, markdownToTree, parseComark, referencesByBlock, liftTitleBlockId, CODE_BLOCK_TAG, COMPONENT_TAGS, HTML_ELEMENTS, type AllowedHtml, type ComarkNode } from './comark-tree'
+import { highlightToTokens } from './code-highlight'
 import { CITATION_TAG } from './citations'
 
 type Element = [string, Record<string, unknown>, ...ComarkNode[]]
@@ -474,7 +475,7 @@ describe('streaming a partial answer', () => {
   // re-parsed on every delta. comark auto-closes, so an open fence is already
   // the component — the raw `::` must never reach the reader.
   it('emits the component node for a fence that has not closed yet', async () => {
-    const nodes = await markdownToTree('Here you go:\n\n::callout{type="warning"}\nmind the gap')
+    const nodes = await markdownToTree('Here you go:\n\n::callout{type="warning"}\nmind the gap', { streaming: true })
     expect(at(nodes, 1)[0]).toBe('callout')
     expect(children(at(nodes, 1))).toEqual(['mind the gap'])
     expect(JSON.stringify(nodes)).not.toContain('::')
@@ -483,7 +484,7 @@ describe('streaming a partial answer', () => {
   it('grows the same component across successive chunks', async () => {
     const chunks = ['::callout{type="info"}\n', '::callout{type="info"}\nhalf', '::callout{type="info"}\nhalf a line\n::\n']
     for (const text of chunks) {
-      expect(at(await markdownToTree(text))[0]).toBe('callout')
+      expect(at(await markdownToTree(text, { streaming: true }))[0]).toBe('callout')
     }
   })
 
@@ -495,12 +496,17 @@ describe('streaming a partial answer', () => {
     }
     const prefixes = ['5', '54ffeb17-9d23-4fd', '54ffeb17-9d23-4fdb-882b-81e9be09c']
     for (const prefix of prefixes) {
-      await markdownToTree(`::image{media="${prefix}`, { resolveMedia })
+      await markdownToTree(`::image{media="${prefix}`, { resolveMedia, streaming: true })
     }
     expect(asked).toEqual([])
 
-    await markdownToTree('::image{media="54ffeb17-9d23-4fdb-882b-81e9be09cab5"}\n::\n', { resolveMedia })
+    await markdownToTree('::image{media="54ffeb17-9d23-4fdb-882b-81e9be09cab5"}\n::\n', { resolveMedia, streaming: true })
     expect(asked).toEqual([['54ffeb17-9d23-4fdb-882b-81e9be09cab5']])
+  })
+
+  it('leaves a complete document unrepaired', async () => {
+    const nodes = await markdownToTree('adjacent **bold***italic* runs.')
+    expect(at(nodes)).toEqual(['p', {}, 'adjacent ', ['strong', {}, 'bold'], ['em', {}, 'italic'], ' runs.'])
   })
 })
 
@@ -671,6 +677,42 @@ describe('the shipped format', () => {
 
   it('lists the attributes a citation needs to name a source and its version', () => {
     expect(listed.citation).toEqual({ nid: true, block: true, v: true, url: true })
+  })
+})
+
+describe('code fences', () => {
+  const fenced = '::block{#b-1a2b}\n```ts\nconst a = 1\n```\n::\n\n```\nplain [1]\n```'
+
+  it('stay a plain pre > code without a highlighter', async () => {
+    const nodes = await markdownToTree(fenced, { allowedHtml: shippedAllowedHtml() })
+    expect(tags(nodes)).toEqual(['pre', 'pre'])
+  })
+
+  it('become code-block nodes with token lines, the block id and the language', async () => {
+    const nodes = await markdownToTree(fenced, { allowedHtml: shippedAllowedHtml(), highlightCode: highlightToTokens })
+    expect(tags(nodes)).toEqual([CODE_BLOCK_TAG, CODE_BLOCK_TAG])
+    const [, props] = at(nodes)
+    expect(props.id).toBe('b-1a2b')
+    expect(props.language).toBe('typescript')
+    expect((props.lines as { content: string }[][])[0]!.map(t => t.content).join('')).toBe('const a = 1')
+    // A fence with no language names none, and a `[1]` inside it stays code.
+    expect(at(nodes, 1)[1].language).toBeUndefined()
+    expect(at(nodes, 1)[1].lines).toEqual([[{ content: 'plain [1]' }]])
+  })
+
+  it('name no language the highlighter does not know', async () => {
+    const nodes = await markdownToTree('```foobar\nx\n```', { highlightCode: highlightToTokens })
+    expect(at(nodes)[1].language).toBeUndefined()
+  })
+
+  it('are found inside other blocks', async () => {
+    const nodes = await markdownToTree('::callout\n```php\n<?php echo 1;\n```\n::', { highlightCode: highlightToTokens })
+    expect(find(nodes, CODE_BLOCK_TAG)?.[1].language).toBe('php')
+  })
+
+  it('cannot be written by an author as a component', async () => {
+    const nodes = await markdownToTree('::code-block{lines="x"}\nhi\n::', { highlightCode: highlightToTokens })
+    expect(tags(nodes)).not.toContain(CODE_BLOCK_TAG)
   })
 })
 

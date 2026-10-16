@@ -53,10 +53,10 @@ function stubNuxt(outline: Outline, pages: KbPageListItem[]) {
   return { refreshed }
 }
 
-/** A `$fetch` that answers writes only when the test says so. */
+/** A `csrfFetch` that answers writes only when the test says so. */
 function deferredFetch() {
   const calls: Array<{ outline: Outline, expect: Outline, resolve: (value: Outline) => void }> = []
-  vi.stubGlobal('$fetch', (_url: string, init: { body: { outline: Outline, expect: Outline } }) =>
+  vi.stubGlobal('csrfFetch', (_url: string, init: { body: { outline: Outline, expect: Outline } }) =>
     new Promise<{ outline: Outline }>((resolve) => {
       calls.push({
         outline: init.body.outline,
@@ -125,7 +125,7 @@ describe('useKbOutline moves', () => {
     // A refused drag may have lost a race, so the pre-drag tree is itself out
     // of date: the optimistic paint goes and Drupal's answer is fetched.
     const { refreshed } = stubNuxt([{ id: 'a' }, { id: 'b' }], ['a', 'b'].map(page))
-    vi.stubGlobal('$fetch', () => Promise.reject(new Error('403')))
+    vi.stubGlobal('csrfFetch', () => Promise.reject(new Error('403')))
     const { trees, move } = useKbOutline()
 
     await move(trees.value[0] as KbSpaceTree, 'b', { parentId: 'a', index: 0 })

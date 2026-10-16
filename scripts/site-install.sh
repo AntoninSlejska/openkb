@@ -23,8 +23,8 @@
 #  - enable services_env_parameter, set the test-editor passwords,
 #  - wait for the sidecar, then re-feed the search indexes (the cron service
 #    pauses until this is done, so it cannot hold the index lock),
-#  - the install marker the cron service and the boot read: cleared while the
-#    site is being rebuilt, written again at the end,
+#  - the install markers the cron service and the boot read: `.openkb-installing`
+#    while the site is being rebuilt, `.openkb-installed` once it is done,
 #
 # The recipes are read from OPENKB_RECIPES_DIR (default: recipes/), next to the
 # composer-installed lupus_decoupled_recipe they build on.
@@ -87,8 +87,12 @@ curl -sf -X DELETE "$OPENSEARCH_URL/default_kb_chunks" >/dev/null 2>&1 || true
 echo "Installing Drupal..."
 # Read-only, so the installer leaves the env-driven settings.php alone.
 chmod a-w web/sites/default/settings.php 2>/dev/null || true
-# From here the site is gone until step 8 writes the marker again, so the cron
-# service stays quiet instead of reporting the install window as broken.
+# From here the site is gone until step 8 swaps the markers back:
+#  - no `.openkb-installed`: the cron service stays quiet instead of reporting
+#    the install window as broken,
+#  - `.openkb-installing`: a boot after a failed install installs over what it
+#    left in the database.
+touch "${PERSISTENT_FILES_DIR:-files}/.openkb-installing"
 rm -f "${PERSISTENT_FILES_DIR:-files}/.openkb-installed"
 $DRUSH sql-create -y
 echo "  recipe: $RECIPE"
@@ -162,11 +166,9 @@ esac
 
 # 6. Re-feed the search index once the sidecar can actually enrich items.
 #
-# A page that is indexed while the Nuxt sidecar is still starting lands
-# without its chunks — the sidecar is what cuts them — and search_api records
-# it as indexed, so a plain `search-api:index` afterwards reports "up to date"
-# and repairs nothing. Wait for the sidecar, then reset the tracker so every
-# item is queued again and re-enriched.
+# The sidecar cuts the chunks, and an item it cannot answer for stays queued,
+# so the indexing batch would retry it until the time limit. Wait for the
+# sidecar, then reset the tracker so every item is queued again and re-enriched.
 if $DRUSH search-api:list 2>/dev/null | grep -q kb_chunks; then
   echo "Waiting for the Nuxt sidecar at $FRONTEND_URL..."
   for i in $(seq 1 120); do
@@ -237,10 +239,11 @@ $DRUSH state:delete openkb.cron_paused
 echo "Rebuilding caches..."
 $DRUSH cache:rebuild
 
-# 8. The install marker, in the persistent files volume the cron service shares.
-# Without it the cron job stays quiet; with it a site that will not bootstrap
-# makes the run fail instead of passing silently.
+# 8. The install markers, in the persistent files volume the cron service and
+# the boot share. Without `.openkb-installed` the cron job stays quiet; with it
+# a site that will not bootstrap makes the run fail instead of passing silently.
 touch "${PERSISTENT_FILES_DIR:-files}/.openkb-installed"
+rm -f "${PERSISTENT_FILES_DIR:-files}/.openkb-installing"
 
 echo ""
 echo "Site installation complete."

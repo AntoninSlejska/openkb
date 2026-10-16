@@ -80,7 +80,7 @@ export function useKbOutline() {
     paint(next)
     const queue = (chain?.queue ?? Promise.resolve()).then(async () => {
       try {
-        const result = await $fetch<{ outline: Outline }>(`/api/spaces/${slug}/outline`, {
+        const result = await csrfFetch<{ outline: Outline }>(`/api/spaces/${slug}/outline`, {
           method: 'PATCH',
           body: { outline: next, expect: space.stored },
         })

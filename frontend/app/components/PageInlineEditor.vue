@@ -6,6 +6,7 @@ import type { EditorState } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 import { starterKitMarkdownOverrides } from '~/editor/extensions'
 import { readUnreadSelection } from '~/editor/selection-sync'
+import { LINK_BUBBLE_KEY, bubbleTargetAt } from '~/editor/link-target'
 import { useEditorSession } from '~/composables/useEditorSession'
 import { useMediaDialogRequest } from '~/composables/useMediaLibraryPicker'
 import type { ReviewStep } from '#shared/page-blocks'
@@ -13,8 +14,9 @@ import type { ReviewStep } from '#shared/page-blocks'
 /**
  * The collab editor surface for the in-place edit mode of the read page.
  *
- * Renders ONLY the TipTap surface plus its overlay UI (bubble toolbar, drag
- * handle, slash menu, mentions, the `[[` document-link picker) — no chrome.
+ * Renders ONLY the TipTap surface plus its overlay UI (bubble toolbar, link
+ * bubble, drag handle, slash menu, mentions, the `[[` document-link picker) —
+ * no chrome.
  * The page owns the chrome: it receives the whole editor session via the
  * `session` emit and renders the formatting toolbar + save/sync chips in the
  * app navbar, so entering edit mode adds zero layout height above the page
@@ -47,7 +49,7 @@ const {
   editorRef, extensions, comarkHandlers,
   slashItems, bubbleItems,
   mentionQuery, mentionItems,
-  docItems, searchDocs, docLabel,
+  docItems, searchDocs, docLabel, resolveTarget,
   blockMenu, hoveredBlock, openBlockMenu, closeBlockMenu, onBlockMenuCloseAutoFocus,
   selectBlockAt,
 } = session
@@ -98,6 +100,7 @@ const bubbleOptions = computed(() => ({ flip: { padding: { top: headerHeight.val
 const bubbleKey = new PluginKey('bubbleMenu')
 /** Whether a mouse button is down in the surface. */
 let pressed = false
+const isPressed = () => pressed
 
 watch(() => editorRef.value?.editor, (editor, _old, onCleanup) => {
   if (!editor) return
@@ -106,14 +109,16 @@ watch(() => editorRef.value?.editor, (editor, _old, onCleanup) => {
    * The `show` meta positions before it shows, and positioning is a no-op
    * while hidden — hence the second dispatch. A blurred editor gets nothing:
    * the plugin hid the menu on the blur. In a table a bare caret is enough.
+   * A link, page link or citation gets the link bubble instead.
    * The release can come before PM has read the click's selection.
    */
   const show = (): void => {
     if (editor.isDestroyed || !editor.view.hasFocus()) return
     readUnreadSelection(editor.view)
-    if (editor.state.selection.empty && !editor.isActive('table')) return
-    editor.view.dispatch(editor.state.tr.setMeta(bubbleKey, 'show'))
-    editor.view.dispatch(editor.state.tr.setMeta(bubbleKey, 'updatePosition'))
+    const key = bubbleTargetAt(editor.state) ? LINK_BUBBLE_KEY : bubbleKey
+    if (key === bubbleKey && editor.state.selection.empty && !editor.isActive('table')) return
+    editor.view.dispatch(editor.state.tr.setMeta(key, 'show'))
+    editor.view.dispatch(editor.state.tr.setMeta(key, 'updatePosition'))
   }
   // Only a mouse: a touch selection has no button to hold the menu down.
   const down = (event: PointerEvent) => {
@@ -130,25 +135,34 @@ watch(() => editorRef.value?.editor, (editor, _old, onCleanup) => {
   }
   /** A key ends the gesture: a keyboard selection must not wait for the button. */
   const key = () => { pressed = false }
-  editor.view.dom.addEventListener('pointerdown', down, true)
-  editor.view.dom.addEventListener('keydown', key, true)
+  // Kept: the editor may be destroyed, and then has no view, by cleanup time.
+  const dom = editor.view.dom
+  dom.addEventListener('pointerdown', down, true)
+  dom.addEventListener('keydown', key, true)
   // A drag that runs past the surface releases outside it.
   document.addEventListener('pointerup', release, true)
   document.addEventListener('pointercancel', release, true)
   window.addEventListener('blur', release)
   onCleanup(() => {
     pressed = false
-    editor.view.dom.removeEventListener('pointerdown', down, true)
-    editor.view.dom.removeEventListener('keydown', key, true)
+    dom.removeEventListener('pointerdown', down, true)
+    dom.removeEventListener('keydown', key, true)
     document.removeEventListener('pointerup', release, true)
     document.removeEventListener('pointercancel', release, true)
     window.removeEventListener('blur', release)
   })
 }, { immediate: true })
 
+/** Hides the formatting bubble when the link bubble opens on request. */
+function hideFormattingBubble(): void {
+  const editor = editorRef.value?.editor
+  if (editor && !editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta(bubbleKey, 'hide'))
+}
+
 /**
  * The plugin's own conditions, plus the mouse hold. In a table a bare caret is
- * enough: the bubble carries that table's row and column controls.
+ * enough: the bubble carries that table's row and column controls. Never
+ * together with the link bubble.
  */
 function bubbleShouldShow(
   { editor, element, view, state, from, to }:
@@ -159,6 +173,7 @@ function bubbleShouldShow(
   const isEmptyTextBlock = !doc.textBetween(from, to).trim().length && isTextSelection(selection)
   const isChildOfMenu = element.contains(document.activeElement)
   if (!(view.hasFocus() || isChildOfMenu) || !editor.isEditable) return false
+  if (bubbleTargetAt(state)) return false
   return editor.isActive('table') || (!selection.empty && !isEmptyTextBlock)
 }
 
@@ -230,6 +245,13 @@ const dragHandleOptions = {
           :should-show="bubbleShouldShow"
           data-testid="bubble-toolbar"
           class="rounded-md border border-default bg-default shadow-lg"
+        />
+        <EditorLinkTargetBubble
+          :editor="editor"
+          :resolve="resolveTarget"
+          :options="bubbleOptions"
+          :held="isPressed"
+          @request="hideFormattingBubble"
         />
         <!-- The handle is both grips: dragging it reorders the block, clicking
              it opens everything else that can be done to the block. The

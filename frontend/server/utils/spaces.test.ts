@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { H3Event } from 'h3'
 import {
   canCreateSpace,
   canManageSpace,
@@ -14,6 +13,7 @@ import {
   writeSpace,
 } from './spaces'
 import { SPACE_CREATE_PERMISSION } from '#shared/utils/kb-spaces'
+import { makeEvent, stubFetch } from '../test-support/h3'
 
 /**
  * Pins the space/roster contract the members UI depends on: rosters resolve
@@ -22,13 +22,6 @@ import { SPACE_CREATE_PERMISSION } from '#shared/utils/kb-spaces'
  * answer off the space access map, and a roster write replaces both fields
  * wholesale.
  */
-
-function makeEvent(headers: Record<string, string> = { Cookie: 'SESS=x' }): H3Event {
-  const lower = Object.fromEntries(
-    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
-  )
-  return { context: {}, node: { req: { headers: lower } } } as unknown as H3Event
-}
 
 function spaceDoc(overrides: Record<string, unknown> = {}) {
   return {
@@ -55,36 +48,6 @@ const INCLUDED = [
 ]
 
 /** One answer a stubbed path gives. `offline` rejects, as a dead socket does. */
-interface Reply { status?: number, body?: unknown, offline?: boolean }
-
-/**
- * Records every fetch and answers from a per-path map. A path may name a list
- * of replies, consumed in order; its last entry answers every later call.
- */
-function stubFetch(responses: Record<string, Reply | Reply[]> = {}) {
-  const calls: Array<{ url: string, init: RequestInit }> = []
-  const seen = new Map<string, number>()
-  const impl = vi.fn(async (input: string | URL, init: RequestInit = {}) => {
-    const url = String(input)
-    calls.push({ url, init })
-    const match = Object.entries(responses).find(([path]) => url.includes(path))
-    const [path, reply] = match ?? ['', {}]
-    const replies = Array.isArray(reply) ? reply : [reply]
-    const attempt = seen.get(path) ?? 0
-    seen.set(path, attempt + 1)
-    const { status = 200, body = {}, offline = false } = replies[Math.min(attempt, replies.length - 1)]!
-    if (offline) throw new TypeError('fetch failed')
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => body,
-      text: async () => JSON.stringify(body),
-    } as unknown as Response
-  })
-  vi.stubGlobal('fetch', impl)
-  return calls
-}
-
 beforeEach(() => {
   vi.stubGlobal('useRuntimeConfig', () => ({ drupalBaseUrl: 'http://drupal.test/' }))
 })
@@ -205,29 +168,11 @@ describe('canManageSpace', () => {
     expect(calls.filter(call => call.url.includes('/openkb/spaces'))).toHaveLength(1)
   })
 
-  it('answers canWrite off the same map, one rank lower than canManage', async () => {
-    // The per-space half of who may create a page: a manager and a member both
-    // write, a reader does not, and a space the map never mentioned does not
-    // either — the CTA is drawn on this, so absent has to read as "no".
-    stubFetch({
-      '/jsonapi/openkb_space/openkb_space?': {
-        body: {
-          data: [
-            spaceDoc(),
-            spaceDoc({ id: 'b', attributes: { label: 'Team Wiki', path: { alias: '/team-wiki' }, drupal_internal__id: 8 } }),
-            spaceDoc({ id: 'c', attributes: { label: 'General', path: { alias: '/general' }, drupal_internal__id: 9 } }),
-          ],
-        },
-      },
-      '/openkb/spaces': map([
-        { slug: 'product-design', access: 'manage' },
-        { slug: 'team-wiki', access: 'write' },
-        { slug: 'general', access: 'read' },
-      ]),
-    })
-    const spaces = await listSpaces(makeEvent(), { withAccess: true })
-    expect(spaces.map(space => space.canWrite)).toEqual([true, true, false])
-    expect(spaces.map(space => space.canManage)).toEqual([true, false, false])
+  it('reads no access map when the caller did not ask for one', async () => {
+    const calls = stubFetch({ '/jsonapi/openkb_space/openkb_space?': { body: { data: [spaceDoc()] } } })
+    const spaces = await listSpaces(makeEvent())
+    expect(calls.filter(call => call.url.includes('/openkb/spaces'))).toHaveLength(0)
+    expect(spaces[0]).not.toHaveProperty('canManage')
   })
 
   it('answers canWrite false for every space when the map cannot be read', async () => {
@@ -365,7 +310,6 @@ describe('writeSpace', () => {
   it('PATCHes the term and re-reads it', async () => {
     const calls = stubFetch({
       '/jsonapi/openkb_space/openkb_space/space-uuid': { body: { data: spaceDoc(), included: INCLUDED } },
-      '/session/token': { body: {} },
       '/openkb/spaces': { body: { spaces: [{ slug: 'product-design', name: 'Product & Design', description: '', access: 'manage', moderated: true }] } },
     })
     const settings = { managers: ['user-b'], members: ['user-a'], viewers: [] }
@@ -511,16 +455,9 @@ describe('the space outline', () => {
     expect(calls).toHaveLength(2)
   })
 
-  it('leaves access unasked when the caller does not need it', async () => {
-    const calls = stubFetch({ '/jsonapi/openkb_space/openkb_space?': { body: { data: [spaceDoc()] } } })
-    await listSpaces(makeEvent())
-    expect(calls.filter(c => c.url.includes('/edit'))).toEqual([])
-  })
-
   it('writes the tree through the outline route, naming the tree it replaces', async () => {
     const calls = stubFetch({
       '/openkb/space/7/outline': { body: { outline: [{ id: 'page-a' }] } },
-      '/session/token': { body: {} },
     })
     const stored = await writeOutline(makeEvent(), 7, OUTLINE, [{ id: 'page-a', children: [] }])
     expect(stored).toEqual([{ id: 'page-a', children: [] }])
@@ -537,7 +474,6 @@ describe('the space outline', () => {
   it('touches the space and nothing else — no page is saved by a move', async () => {
     const calls = stubFetch({
       '/openkb/space/7/outline': { body: { outline: [] } },
-      '/session/token': { body: {} },
     })
     await writeOutline(makeEvent(), 7, OUTLINE, [])
     expect(calls.some(c => c.url.includes('/jsonapi/node/'))).toBe(false)

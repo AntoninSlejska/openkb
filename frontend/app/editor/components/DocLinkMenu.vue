@@ -16,6 +16,7 @@ import type { Transaction } from '@tiptap/pm/state'
 import type { DocLinkItem } from '~/composables/useDocLinkSearch'
 import { takeLinkSelection } from '~/editor/doc-link-selection'
 import { reciteInBlock } from '~/editor/cite-insert'
+import { retargetedCitation } from '~/editor/link-target'
 import { CITATION_TAG, citeTarget } from '#shared/utils/citations'
 
 /**
@@ -83,6 +84,15 @@ function spaceNeededAt(editor: Editor): boolean {
   if (from <= 1) return false
   const before = editor.state.doc.textBetween(from - 1, from, '', ' ')
   return before !== '' && !/\s/.test(before)
+}
+
+/**
+ * The space that gives the caret somewhere to land after an inserted atom.
+ * None where a replaced node leaves one behind already.
+ */
+function spaceAfter(editor: Editor, at: number, replacing: boolean): Array<{ type: 'text', text: string }> {
+  const next = editor.state.doc.textBetween(at, Math.min(at + 1, editor.state.doc.content.size), '', ' ')
+  return replacing && /^\s/.test(next) ? [] : [{ type: 'text', text: ' ' }]
 }
 
 /** A query naming a source outside the knowledge base. */
@@ -183,12 +193,12 @@ onMounted(async () => {
     suggestion: { allowSpaces: true, allowedPrefixes: null },
     ui,
     onSelect: (editor: Editor, range: { from: number, to: number }, item: DocLinkItem) => {
-      // The words the trigger was opened on, if any: they are the label, and no
-      // title has to be resolved for one. The trigger sits after them, so the
-      // link replaces the words and the trigger together.
-      const wrapped = takeLinkSelection(range.from)
-      // A citation carries no words of its own, so only a link reaches back.
-      const from = props.mode === 'cite' ? range.from : wrapped?.range?.from ?? range.from
+      // The words or node the trigger was opened on, if any. The trigger sits
+      // after them, so the pick replaces them and the trigger together. Words
+      // are the label, and no title has to be resolved for one.
+      const taken = takeLinkSelection(range.from)
+      const wrapped = props.mode === 'cite' ? retargetedCitation(editor.state.doc, taken) : taken
+      const from = wrapped?.range?.from ?? range.from
       editor.chain().focus().deleteRange({ from, to: range.to }).run()
       // A citation carries a target and no words, so nothing has to resolve
       // before it is written.
@@ -198,15 +208,14 @@ onMounted(async () => {
           : { nid: item.nid, block: item.block, v: item.v ?? null, url: null }
         const target = citeTarget(attrs)
         if (!target) return
-        if (reciteInBlock(editor, target, item.v ?? null)) return
+        // A replaced citation keeps its place.
+        if (!wrapped?.range && reciteInBlock(editor, target, item.v ?? null)) return
         editor.chain().focus().insertContent([
           // comark reads `:name{…}` as a component only after whitespace;
           // tight after a word the braces become the block's own props.
           ...(spaceNeededAt(editor) ? [{ type: 'text', text: ' ' }] : []),
           { type: CITATION_TAG, attrs },
-          // Without the trailing space the caret has nowhere to land after
-          // the atom.
-          { type: 'text', text: ' ' },
+          ...spaceAfter(editor, editor.state.selection.from, !!wrapped?.range),
         ]).run()
         return
       }
@@ -215,15 +224,14 @@ onMounted(async () => {
         at = transaction.mapping.map(at)
       }
       editor.on('transaction', track)
-      const named = wrapped ? Promise.resolve(wrapped.text) : props.resolveLabel(item)
+      const named = wrapped?.text.trim() ? Promise.resolve(wrapped.text) : props.resolveLabel(item)
       named.then((label) => {
         // Leaving edit mode mid-resolve destroys the editor under this chain.
         if (editor.isDestroyed) return
-        editor.chain().focus().insertContentAt(Math.min(at, editor.state.doc.content.size), [
+        const pos = Math.min(at, editor.state.doc.content.size)
+        editor.chain().focus().insertContentAt(pos, [
           { type: 'docLink', attrs: { nid: item.nid, block: item.block, label } },
-          // Without the trailing space the caret has nowhere to land after
-          // the atom.
-          { type: 'text', text: ' ' },
+          ...spaceAfter(editor, pos, !!wrapped?.range),
         ]).run()
       }).finally(() => {
         editor.off('transaction', track)

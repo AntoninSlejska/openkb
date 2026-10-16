@@ -5,8 +5,11 @@ import {
   commentRecords,
   commentsSynced,
   seedComments,
+  stampCommentAuthors,
   META_NODE_UUID,
+  type CommentWriter,
 } from './collab-comments'
+import { commentsRoot, type CommentMessage } from '#shared/block-comments'
 
 /**
  * What a checkpoint states, and what a reconcile makes of Drupal's answer.
@@ -131,5 +134,119 @@ describe('seedComments', () => {
 
     expect(seedComments(doc, OWNER, [])).toBe('seeded')
     expect(commentRecords(doc).map(record => record.msg_id)).toEqual(['m-1'])
+  })
+})
+
+describe('stampCommentAuthors', () => {
+  const PEER = { source: 'connection' }
+  const EDITOR2: CommentWriter = { uid: 9, name: 'editor2', via: null }
+
+  /** A document whose comment writes from {@link PEER} are filed under `writer`. */
+  function stamping(writer: CommentWriter | null): Y.Doc {
+    const doc = new Y.Doc()
+    commentsRoot(doc).observe((event, transaction) => {
+      if (transaction.origin === PEER) stampCommentAuthors(event, writer)
+    })
+    return doc
+  }
+
+  function write(doc: Y.Doc, msg: string, message: CommentMessage, origin: unknown = PEER): void {
+    doc.transact(() => { commentsRoot(doc).set(`b-1\u0000c-1:${msg}`, message) }, origin)
+  }
+
+  function messages(doc: Y.Doc) {
+    return commentRecords(doc).map(record => ({ msg: record.msg_id, ...record.data }))
+  }
+
+  it('drops a message a peer files under another account', () => {
+    const doc = stamping(EDITOR2)
+    write(doc, 'm-1', { uid: 7, name: 'editor1', at: AT, text: 'as editor1' })
+    expect(messages(doc)).toEqual([])
+    expect(commentsRoot(doc).size).toBe(0)
+  })
+
+  it('files a peer\'s own message under its server-known name, without a via', () => {
+    const doc = stamping(EDITOR2)
+    write(doc, 'm-1', { uid: 9, name: 'admin', via: 'Claude', at: AT, text: 'mine' })
+    write(doc, 'm-2', { uid: null, at: AT + 1, text: 'before /api/me answered' })
+    expect(messages(doc)).toEqual([
+      { msg: 'm-1', uid: 9, name: 'editor2', at: AT, text: 'mine' },
+      { msg: 'm-2', uid: 9, name: 'editor2', at: AT + 1, text: 'before /api/me answered' },
+    ])
+  })
+
+  it('keeps an agent\'s via', () => {
+    const doc = stamping({ uid: 9, name: 'editor2', via: 'Claude' })
+    write(doc, 'm-1', { uid: 9, name: 'editor2', at: AT, text: 'from the agent' })
+    expect(messages(doc)).toEqual([
+      { msg: 'm-1', uid: 9, name: 'editor2', via: 'Claude', at: AT, text: 'from the agent' },
+    ])
+  })
+
+  it('drops a write with no writer behind it', () => {
+    const doc = stamping(null)
+    write(doc, 'm-1', { uid: 9, name: 'editor2', at: AT, text: 'nobody' })
+    expect(commentsRoot(doc).size).toBe(0)
+  })
+
+  it('puts back another account\'s message a peer deletes or overwrites', () => {
+    const doc = stamping(EDITOR2)
+    seedComments(doc, OWNER, [stored('b-1', 'c-1', 'm-1', 'said by fago')])
+    const original = { msg: 'm-1', uid: 7, at: AT, name: 'fago', text: 'said by fago' }
+
+    doc.transact(() => { commentsRoot(doc).delete('b-1\u0000c-1:m-1') }, PEER)
+    expect(messages(doc)).toEqual([original])
+    write(doc, 'm-1', { uid: 9, name: 'editor2', at: AT, text: 'now mine' })
+    expect(messages(doc)).toEqual([original])
+    write(doc, 'm-1', { uid: 3, name: 'editor3', at: AT, text: 'now editor3\'s' })
+    expect(messages(doc)).toEqual([original])
+  })
+
+  it('lets a peer delete and rewrite its own message', () => {
+    const doc = stamping(EDITOR2)
+    write(doc, 'm-1', { uid: 9, at: AT, text: 'mine' })
+    write(doc, 'm-1', { uid: 9, at: AT, text: 'still mine' })
+    expect(messages(doc)).toEqual([{ msg: 'm-1', uid: 9, name: 'editor2', at: AT, text: 'still mine' }])
+    doc.transact(() => { commentsRoot(doc).delete('b-1\u0000c-1:m-1') }, PEER)
+    expect(commentsRoot(doc).size).toBe(0)
+  })
+
+  it('removes a value that is not a plain message', () => {
+    const doc = stamping(EDITOR2)
+    doc.transact(() => {
+      const nested = new Y.Map<unknown>()
+      commentsRoot(doc).set('b-1\u0000c-1:m-1', nested)
+      nested.set('uid', 9)
+      nested.set('at', AT)
+      commentsRoot(doc).set('b-1\u0000c-1:m-2', { uid: 9, text: 'no timestamp' })
+      commentsRoot(doc).set('b-1\u0000c-1:m-3', 'text')
+    }, PEER)
+    expect(commentsRoot(doc).size).toBe(0)
+    expect(() => Y.encodeStateAsUpdate(doc)).not.toThrow()
+  })
+
+  it('removes a message carrying a value JSON cannot hold', () => {
+    const doc = stamping(EDITOR2)
+    doc.transact(() => {
+      commentsRoot(doc).set('b-1\u0000c-1:m-1', { uid: 9, at: AT, text: 10n } as unknown as CommentMessage)
+      commentsRoot(doc).set('b-1\u0000c-1:m-2', { uid: 9, at: AT, extra: { deep: [1n] } } as unknown as CommentMessage)
+    }, PEER)
+    expect(commentsRoot(doc).size).toBe(0)
+    expect(() => JSON.stringify(commentRecords(doc))).not.toThrow()
+  })
+
+  it('puts back another account\'s message that has no timestamp', () => {
+    const doc = stamping(EDITOR2)
+    doc.transact(() => {
+      commentsRoot(doc).set('b-1\u0000c-1:m-1', { uid: 7, name: 'fago', text: 'via the API' } as unknown as CommentMessage)
+    })
+    doc.transact(() => { commentsRoot(doc).delete('b-1\u0000c-1:m-1') }, PEER)
+    expect(commentsRoot(doc).get('b-1\u0000c-1:m-1')).toEqual({ uid: 7, name: 'fago', text: 'via the API' })
+  })
+
+  it('leaves the server\'s own writes — a seed — as Drupal stated them', () => {
+    const doc = stamping(EDITOR2)
+    seedComments(doc, OWNER, [stored('b-1', 'c-1', 'm-1', 'said by fago')])
+    expect(messages(doc)).toEqual([{ msg: 'm-1', uid: 7, at: AT, name: 'fago', text: 'said by fago' }])
   })
 })

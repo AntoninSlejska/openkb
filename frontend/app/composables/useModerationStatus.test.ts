@@ -24,11 +24,13 @@ function stubNuxt(answer: unknown = STANDING) {
   vi.stubGlobal('onMounted', (fn: () => void) => { mount = fn })
   vi.stubGlobal('useToast', () => ({ add: (toast: { title?: string }) => { toasts.push(toast) } }))
   vi.stubGlobal('console', { ...console, error: () => {} })
-  vi.stubGlobal('useRequestFetch', () => async (url: string) => {
+  const fetch = async (url: string) => {
     requests.push(url)
     if (answer instanceof Error) throw answer
     return answer
-  })
+  }
+  vi.stubGlobal('useRequestFetch', () => fetch)
+  vi.stubGlobal('csrfFetch', fetch)
   return requests
 }
 

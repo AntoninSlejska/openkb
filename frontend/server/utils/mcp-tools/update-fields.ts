@@ -18,6 +18,7 @@ export function updateFieldsTool(frontmatterSchema: JsonSchema): KbTool {
   const { additionalProperties: _closed, ...contract } = frontmatterSchema
   return {
     name: 'updateFields',
+    manifestName: 'update_fields',
     description:
       "Update frontmatter fields of a knowledge-base page's draft. Only the "
       + 'fields you pass are touched; the body is left alone. The edit is applied '

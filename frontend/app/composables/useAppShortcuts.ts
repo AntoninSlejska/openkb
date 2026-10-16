@@ -19,10 +19,7 @@ export function useAppShortcuts() {
   const route = useRoute()
   const { toggleChat } = useSidePane()
 
-  defineShortcuts({
-    meta_k: () => openSearch(),
-    meta_j: { usingInput: true, handler: () => toggleChat() },
-  }, { layoutIndependent: true })
+  defineShortcuts(appShortcutBindings({ openSearch, toggleChat }), { layoutIndependent: true })
 
   /**
    * Search is a route, not a command palette, so the shortcut navigates there
@@ -34,6 +31,14 @@ export function useAppShortcuts() {
       return
     }
     void router.push('/search').then(focusSearchInput)
+  }
+}
+
+/** The `defineShortcuts` map — the help page lists exactly its keys. */
+export function appShortcutBindings(on: { openSearch: () => void, toggleChat: () => void }) {
+  return {
+    meta_k: () => on.openSearch(),
+    meta_j: { usingInput: true, handler: () => on.toggleChat() },
   }
 }
 

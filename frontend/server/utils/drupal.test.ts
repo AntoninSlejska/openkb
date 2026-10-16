@@ -1,41 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { H3Event } from 'h3'
-import { commitKbPageWithAuth, createKbPage, deleteKbPageWithAuth, drupalFetch, drupalFetchWithCookie, fetchCeNode, fetchCeRevision, fetchCeWorkingCopy, findKbPageByPath, patchKbPageWithAuth, probeDeleteAccess, sitePermissions, type CePageRead } from './drupal'
+import { commitKbPageWithAuth, createKbPage, deleteKbPageWithAuth, drupalFetch, fetchCeNode, fetchCeRevision, fetchCeWorkingCopy, findKbPageByPath, probeDeleteAccess, sitePermissions, type CePageRead } from './drupal'
+import { makeEvent, stubFetch } from '../test-support/h3'
 
 /**
  * Pins the auth-forwarding contract of the JSON:API bridge: the incoming
  * carrier (Bearer token or session cookie) is forwarded verbatim, exactly one
- * of them, and the CSRF-token dance stays a cookie-only concern.
+ * of them, and a cookie write carries the CSRF token the browser sent.
  */
-
-function makeEvent(headers: Record<string, string>): H3Event {
-  const lower = Object.fromEntries(
-    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
-  )
-  return {
-    context: {},
-    node: { req: { headers: lower } },
-  } as unknown as H3Event
-}
-
-/** Records every fetch and answers from a per-path map. */
-function stubFetch(responses: Record<string, { status?: number, body?: unknown, text?: string }> = {}) {
-  const calls: Array<{ url: string, init: RequestInit }> = []
-  const impl = vi.fn(async (input: string | URL, init: RequestInit = {}) => {
-    const url = String(input)
-    calls.push({ url, init })
-    const match = Object.entries(responses).find(([path]) => url.includes(path))
-    const { status = 200, body = {}, text = '' } = match?.[1] ?? {}
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => body,
-      text: async () => text || JSON.stringify(body),
-    } as unknown as Response
-  })
-  vi.stubGlobal('fetch', impl)
-  return calls
-}
 
 beforeEach(() => {
   vi.stubGlobal('useRuntimeConfig', () => ({ drupalBaseUrl: 'http://drupal.test/' }))
@@ -85,14 +56,18 @@ describe('drupalFetch auth forwarding', () => {
     expect(headers.Authorization).toBeUndefined()
   })
 
-  it('sends a cookie-authed write through the CSRF-token dance', async () => {
-    const calls = stubFetch({ '/session/token': { text: 'csrf-1' } })
+  it('forwards the CSRF token the browser sent with its cookie, and fetches none', async () => {
+    const calls = stubFetch()
+    await drupalFetch(makeEvent({ 'Cookie': 'SESS=x', 'X-CSRF-Token': 'browser-1' }), '/jsonapi/node/kb_page/u-1', { method: 'PATCH', body: '{}' })
+    expect(calls.map(c => c.url)).toEqual(['http://drupal.test/jsonapi/node/kb_page/u-1'])
+    expect((calls[0]!.init.headers as Record<string, string>)['X-CSRF-Token']).toBe('browser-1')
+  })
+
+  it('sends a cookie write without a token as it came, for Drupal to refuse', async () => {
+    const calls = stubFetch()
     await drupalFetch(makeEvent({ Cookie: 'SESS=x' }), '/jsonapi/node/kb_page/u-1', { method: 'PATCH', body: '{}' })
-    expect(calls.map(c => c.url)).toEqual([
-      'http://drupal.test/session/token',
-      'http://drupal.test/jsonapi/node/kb_page/u-1',
-    ])
-    expect((calls[1]!.init.headers as Record<string, string>)['X-CSRF-Token']).toBe('csrf-1')
+    expect(calls.map(c => c.url)).toEqual(['http://drupal.test/jsonapi/node/kb_page/u-1'])
+    expect((calls[0]!.init.headers as Record<string, string>)['X-CSRF-Token']).toBeUndefined()
   })
 
   it('skips the CSRF-token fetch for a token-authed write', async () => {
@@ -103,13 +78,6 @@ describe('drupalFetch auth forwarding', () => {
     expect((calls[0]!.init.headers as Record<string, string>)['X-CSRF-Token']).toBeUndefined()
   })
 
-  it('keeps the captured-cookie path of the headless commit service intact', async () => {
-    const calls = stubFetch({ '/session/token': { text: 'csrf-1' } })
-    await drupalFetchWithCookie('SESS=captured', '/jsonapi/node/kb_page/u-1', { method: 'PATCH', body: '{}' })
-    const headers = calls[1]!.init.headers as Record<string, string>
-    expect(headers.Cookie).toBe('SESS=captured')
-    expect(headers['X-CSRF-Token']).toBe('csrf-1')
-  })
 })
 
 /**
@@ -372,27 +340,26 @@ describe('fetchCeRevision', () => {
 describe('commitKbPageWithAuth', () => {
   it('POSTs the payload fragment to the commit route, addressed by nid', async () => {
     const calls = stubFetch({
-      '/session/token': { text: 'csrf-1' },
       // The route is core's JSON:API entity resource underneath, so the written
       // revision comes back as a JSON:API document.
       '/openkb/node/7/commit': { body: { data: { attributes: { changed: '2026-07-02T10:00:00+00:00' } } } },
     })
 
-    const written = await commitKbPageWithAuth({ Cookie: 'SESS=x' }, 7, '# Body', {
+    const written = await commitKbPageWithAuth({ 'Cookie': 'SESS=x', 'X-CSRF-Token': 'browser-1' }, 7, '# Body', {
       attributes: { moderation_state: 'draft' },
       relationships: { field_owner: { data: { type: 'user--user', id: 'u-1' } } },
     })
 
     expect(written.changed).toBe(Math.floor(Date.parse('2026-07-02T10:00:00+00:00') / 1000))
     expect(written.review).toBeNull()
-    const write = calls[1]!
+    const write = calls[0]!
     expect(write.url).toBe('http://drupal.test/openkb/node/7/commit')
     expect(write.init.method).toBe('POST')
     const headers = write.init.headers as Record<string, string>
     // The request body is the bare commit fragment, not a JSON:API document,
     // so it does not claim the media type the bridge defaults to.
     expect(headers['Content-Type']).toBe('application/json')
-    expect(headers['X-CSRF-Token']).toBe('csrf-1')
+    expect(headers['X-CSRF-Token']).toBe('browser-1')
     expect(JSON.parse(write.init.body as string)).toEqual({
       attributes: {
         field_kb_body: { value: '# Body' },
@@ -433,7 +400,6 @@ describe("the body's text format", () => {
     })
     const auth = { Authorization: 'Bearer tok-1' }
 
-    await patchKbPageWithAuth(auth, 'u-1', '# Patched')
     await commitKbPageWithAuth(auth, 7, '# Committed')
     await createKbPage(makeEvent(auth), { title: 'New', spaceId: 's-1', body: '# Created' })
 
@@ -442,7 +408,6 @@ describe("the body's text format", () => {
       .map(call => JSON.parse(call.init.body as string))
       .map(payload => (payload.data?.attributes ?? payload.attributes).field_kb_body)
     expect(bodies).toEqual([
-      { value: '# Patched' },
       { value: '# Committed' },
       { value: '# Created' },
     ])
@@ -492,9 +457,6 @@ describe('deleteKbPageWithAuth', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init: RequestInit = {}) => {
       const url = String(input)
       calls.push(`${(init.method ?? 'GET')} ${url}`)
-      if (url.includes('/session/token')) {
-        return { ok: true, status: 200, text: async () => 'csrf-1' } as unknown as Response
-      }
       const next = queue.shift() ?? { status: 500 }
       return {
         ok: next.status >= 200 && next.status < 300,
@@ -505,16 +467,13 @@ describe('deleteKbPageWithAuth', () => {
     return calls
   }
 
-  it('DELETEs once, CSRF-token first, on the happy path', async () => {
+  it('DELETEs once on the happy path', async () => {
     const calls = stubDeleteSequence([{ status: 204 }])
     await deleteKbPageWithAuth({ Cookie: 'SESS=x' }, 'u-1')
-    expect(calls).toEqual([
-      'GET http://drupal.test/session/token',
-      'DELETE http://drupal.test/jsonapi/node/kb_page/u-1',
-    ])
+    expect(calls).toEqual(['DELETE http://drupal.test/jsonapi/node/kb_page/u-1'])
   })
 
-  it('retries a deadlock and succeeds, without re-fetching the CSRF token', async () => {
+  it('retries a deadlock and succeeds', async () => {
     vi.useFakeTimers()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
     const calls = stubDeleteSequence([
@@ -524,7 +483,6 @@ describe('deleteKbPageWithAuth', () => {
     const done = deleteKbPageWithAuth({ Cookie: 'SESS=x' }, 'u-1')
     await vi.advanceTimersByTimeAsync(2000)
     await expect(done).resolves.toBeUndefined()
-    expect(calls.filter(c => c.includes('/session/token'))).toHaveLength(1)
     expect(calls.filter(c => c.startsWith('DELETE'))).toHaveLength(2)
     vi.useRealTimers()
   })

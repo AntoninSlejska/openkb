@@ -116,8 +116,14 @@ export async function heldAgentSession(key: string, now = Date.now()): Promise<H
   return entry
 }
 
-/** Keeps a freshly opened session for the calls that follow. */
-export function holdAgentSession(key: string, held: HeldAgentSession, now = Date.now()): void {
+/**
+ * Keeps a freshly opened session for the calls that follow.
+ *
+ * A session already held for the key is closed first: overwritten, it would
+ * keep its connection and presence timer until the process exits.
+ */
+export async function holdAgentSession(key: string, held: HeldAgentSession, now = Date.now()): Promise<void> {
+  if (open.has(key)) await closeAgentSessions({ key })
   const entry: OpenSession = { ...held, openedAt: now, inFlight: 0 }
   armIdle(key, entry, now)
   open.set(key, entry)

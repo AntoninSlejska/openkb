@@ -5,8 +5,8 @@
  *
  * The rows live in the repo next to the code they describe, so a release
  * cannot ship a page naming a shortcut nothing binds. `appShortcuts` carries
- * the `defineShortcuts` id of every entry and `help-shortcuts.test.ts` reads
- * those ids back off `composables/useAppShortcuts.ts`.
+ * the `defineShortcuts` id of every entry and `help-shortcuts.test.ts` holds
+ * them to the keys of `appShortcutBindings`.
  *
  * Every `what` is plain prose — the page renders it as text. A spelling that
  * has to read as code belongs in `keys` or `code`.
@@ -67,7 +67,10 @@ export const editorShortcuts: ShortcutRow[] = [
   { keys: ['meta', 'X'], what: 'Cut the block its ⠿ gutter selected' },
   { keys: ['meta', 'C'], what: 'Copy that block, as markdown carrying its id' },
   { keys: ['meta', 'V'], what: 'Paste the clipboard at the caret. To put copied blocks in as blocks of their own, use “Paste below” in the ⠿ menu' },
-  { keys: ['escape'], what: 'Leave a picker, keeping what was typed as text' },
+  { keys: ['meta', 'K'], what: 'On a link, page link or citation: show where it points, with Open, Change and Remove. On selected words: link them to an address' },
+  { keys: ['meta', 'Click'], what: 'Open a link, page link or citation in a new tab. A middle-click does the same' },
+  { keys: ['tab'], what: 'Move into the link bubble while it shows' },
+  { keys: ['escape'], what: 'Leave a picker, keeping what was typed as text. In the link bubble: back to the text' },
 ]
 
 /** The sequences that open something while typing in the editor. */

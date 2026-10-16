@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ModerationStatus } from '#shared/utils/moderation'
 
-defineProps<{
+const props = defineProps<{
   status: ModerationStatus | null
   busy: 'publish' | 'revert' | null
   nid?: number
@@ -9,6 +9,8 @@ defineProps<{
   canDelete: boolean
   /** 'preparing' while the editor preloads — the Edit button shows the spinner. */
   mode: 'read' | 'preparing' | 'edit'
+  /** The editor waits on a collab server that has not answered. */
+  collabUnreachable?: boolean
   title: string
   /** The page's revisions page, when this session may follow it. */
   historyHref?: string | null
@@ -19,6 +21,8 @@ defineProps<{
 const emit = defineEmits<{
   (e: 'revert'): void
   (e: 'edit'): void
+  (e: 'retry'): void
+  (e: 'cancel'): void
   (e: 'deleted'): void
 }>()
 
@@ -30,6 +34,15 @@ const { toggleChat } = useSidePane()
 const nuxtApp = useNuxtApp()
 const ready = ref(import.meta.client && !nuxtApp.isHydrating)
 onNuxtReady(() => { ready.value = true })
+
+// Retry takes the place of the focused Edit button; without this, focus falls
+// to <body>.
+const retryButton = useTemplateRef<{ $el: HTMLElement }>('retryButton')
+watch(() => props.collabUnreachable, async (unreachable) => {
+  if (!unreachable) return
+  await nextTick()
+  if (!document.activeElement || document.activeElement === document.body) retryButton.value?.$el.focus()
+})
 </script>
 
 <template>
@@ -39,8 +52,35 @@ onNuxtReady(() => { ready.value = true })
     :can-edit="canEdit"
     @revert="emit('revert')"
   />
-  <UButton
+  <!-- Mounted before the state changes, so screen readers announce it. -->
+  <span
     v-if="nid && canEdit"
+    role="status"
+    :class="collabUnreachable ? 'sr-only sm:not-sr-only self-center text-sm text-toned' : 'sr-only'"
+  >{{ collabUnreachable ? 'Collab server unreachable, retrying' : '' }}</span>
+  <template v-if="nid && canEdit && collabUnreachable">
+    <UButton
+      ref="retryButton"
+      color="warning"
+      variant="soft"
+      size="sm"
+      icon="i-lucide-refresh-cw"
+      data-testid="collab-unreachable"
+      @click="emit('retry')"
+    >
+      Retry
+    </UButton>
+    <UButton
+      color="neutral"
+      variant="ghost"
+      size="sm"
+      @click="emit('cancel')"
+    >
+      Cancel
+    </UButton>
+  </template>
+  <UButton
+    v-else-if="nid && canEdit"
     color="primary"
     variant="solid"
     size="sm"

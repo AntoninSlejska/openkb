@@ -16,11 +16,11 @@ import * as Y from 'yjs'
  * contributor recorded from a write, an approval recorded against an
  * authenticated request — and Drupal refuses every client-supplied byte of it
  * (`openkb_agent_entity_field_access()`). A comment is the opposite kind of
- * value: its author is whoever typed it, stated by the client that did, and
- * nothing about it is derivable from a diff. Putting the two in one container
- * would mean either weakening the field the gate's trust rests on, or
- * inventing a server-witnessed write path for a note that gates nothing. A
- * container of its own costs neither.
+ * value: its author is whoever typed it, stamped by the server from the
+ * writing connection, and nothing about it is derivable from a diff. Putting
+ * the two in one container would mean either weakening the field the gate's
+ * trust rests on, or inventing a server-witnessed write path for a note that
+ * gates nothing. A container of its own costs neither.
  *
  * ## One key per MESSAGE
  *

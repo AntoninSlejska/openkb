@@ -5,6 +5,7 @@ import {
   refusalFromTheCasCheck,
   drupalMock,
   drupalToolsMock,
+  toolManifestMock,
   hocuspocusMock,
   kbReadMock,
   sessionRouterMock,
@@ -25,6 +26,7 @@ vi.mock('../drupal', () => drupalMock)
 vi.mock('../session-router', importOriginal => sessionRouterMock(importOriginal))
 vi.mock('../hocuspocus', () => hocuspocusMock)
 vi.mock('../drupal-tools', () => drupalToolsMock)
+vi.mock('../tool-manifest', () => toolManifestMock)
 
 describe('updateBlocks', () => {
   beforeEach(resetMocks)

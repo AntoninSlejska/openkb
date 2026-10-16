@@ -70,27 +70,33 @@ interface Session {
   doc: Y.Doc
 }
 
+/** The session's CSRF token, read the way the app reads it. */
+async function sessionToken(cookie: string): Promise<string> {
+  return (await (await fetch(`${NUXT_URL}/session/token`, { headers: { Cookie: cookie } })).text()).trim()
+}
+
 /**
  * A `ws` client that puts the session cookie where a browser puts it.
  *
- * The collab server derives identity from the handshake's Cookie header and
- * refuses any credential handed in through the hocuspocus `token`, so a test
- * authenticating the easy way would be testing a door the product does not
- * have.
+ * The collab server derives identity from the handshake's Cookie header; the
+ * hocuspocus `token` carries only the session's CSRF token (ADR 0019).
  */
-function cookieWebSocket(cookie: string | null): typeof WebSocket {
+function cookieWebSocket(cookie: string | null, origin?: string): typeof WebSocket {
   return class extends WebSocket {
     constructor(url: string, protocols?: string | string[]) {
-      super(url, protocols, cookie ? { headers: { Cookie: cookie } } : {})
+      super(url, protocols, {
+        headers: { ...(cookie ? { Cookie: cookie } : {}) },
+        ...(origin ? { origin } : {}),
+      })
     }
   } as unknown as typeof WebSocket
 }
 
-function connect(cookie: string | null, docName: string = DOC_NAME, timeoutMs = 15_000): Promise<Session> {
+function connect(cookie: string | null, docName: string = DOC_NAME, timeoutMs = 15_000, origin?: string): Promise<Session> {
   const doc = new Y.Doc()
   const socket = new HocuspocusProviderWebsocket({
     url: WS_URL,
-    WebSocketPolyfill: cookieWebSocket(cookie),
+    WebSocketPolyfill: cookieWebSocket(cookie, origin),
   })
   return new Promise<Session>((resolve, reject) => {
     const timer = setTimeout(
@@ -101,6 +107,7 @@ function connect(cookie: string | null, docName: string = DOC_NAME, timeoutMs = 
       websocketProvider: socket,
       name: docName,
       document: doc,
+      token: () => cookie ? sessionToken(cookie) : '',
       onSynced: () => {
         clearTimeout(timer)
         resolve({ provider, socket, doc })
@@ -181,17 +188,18 @@ async function waitForBody(cookie: string, nid: number, marker: string, timeoutM
 }
 
 /**
- * Write the body straight to Drupal, bypassing the editor — the same "external
- * agent" path the e2e suite uses. Returns the new `changed`.
+ * Write the body straight to Drupal over JSON:API, bypassing the editor — an
+ * external writer. Keeps the stored title heading. Returns the new `changed`.
  */
-async function patchBody(cookie: string, nid: number, body: string): Promise<number> {
-  const res = await fetch(`${NUXT_URL}/api/node/${nid}`, {
+async function patchBody(cookie: string, uuid: string, body: string): Promise<number> {
+  type Page = { data: { attributes: { changed: string, field_kb_body: { value: string } } } }
+  const stored = (await jsonApi<Page>(cookie, `/jsonapi/node/kb_page/${uuid}`)).data.attributes.field_kb_body.value
+  const heading = stored.match(/^# .*\n\n?/)?.[0] ?? ''
+  const written = await jsonApi<Page>(cookie, `/jsonapi/node/kb_page/${uuid}`, {
     method: 'PATCH',
-    headers: { Cookie: cookie, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body, expected_changed: 0 }),
+    body: JSON.stringify({ data: { type: 'node--kb_page', id: uuid, attributes: { field_kb_body: { value: heading + body } } } }),
   })
-  if (!res.ok) throw new Error(`PATCH /api/node/${nid} ${res.status}: ${(await res.text()).slice(0, 300)}`)
-  return ((await res.json()) as { changed: number }).changed
+  return Math.floor(new Date(written.data.attributes.changed).getTime() / 1000)
 }
 
 /**
@@ -207,7 +215,7 @@ async function patchBody(cookie: string, nid: number, body: string): Promise<num
 async function commitNow(cookie: string, nid: number): Promise<{ ok: boolean, committed: boolean }> {
   const res = await fetch(`${NUXT_URL}/api/node/${nid}/commit`, {
     method: 'POST',
-    headers: { Cookie: cookie },
+    headers: { 'Cookie': cookie, 'X-CSRF-Token': await sessionToken(cookie) },
   })
   if (!res.ok) throw new Error(`POST /api/node/${nid}/commit ${res.status}: ${(await res.text()).slice(0, 300)}`)
   return await res.json() as { ok: boolean, committed: boolean }
@@ -497,19 +505,26 @@ describe('collaboration WS bridge', () => {
     await expect(open(null)).rejects.toThrow(/authentication failed/i)
   })
 
+  it('admits a handshake from its own origin and refuses a foreign one', { timeout: 30_000 }, async () => {
+    const own = new URL(WS_URL.replace(/^ws/, 'http')).origin
+    const session = await connect(cookie, DOC_NAME, 15_000, own)
+    sessions.push(session)
+    expect(session.provider.isAuthenticated).toBe(true)
+
+    await expect(connect(cookie, DOC_NAME, 15_000, 'https://evil.example')).rejects.toThrow(/authentication failed/i)
+  })
+
   /**
-   * Case 9: no credential a client declares gets a seat at the document.
+   * Case 9: the handshake's `token` is the session's CSRF token and nothing
+   * else (ADR 0019).
    *
-   * The handshake carries the browser's HttpOnly cookie by itself, so the
-   * `token` channel exists only for something that had to name its own
-   * credential — an agent's Bearer token above all. Honouring it would seat a
-   * writer whose identity nobody derived, putting ops into the document that
-   * nobody witnessed. An agent reaches the document the other way, in-process
-   * through the agent adapter (ADR 0003), where the session router decides
-   * admission. Refused even alongside a cookie Drupal would otherwise honour.
+   * - A page of another site can open a socket with the cookie but cannot read
+   *   the token.
+   * - An agent's Bearer token is no CSRF token: agents join in-process through
+   *   the agent adapter (ADR 0003).
    */
-  it('refuses a handshake that declares a credential, cookie or not', { timeout: 20_000 }, async () => {
-    const declaring = (sessionCookie: string | null): Promise<Session> => {
+  it('refuses a handshake without the session\'s own CSRF token', { timeout: 30_000 }, async () => {
+    const declaring = (sessionCookie: string | null, token: string): Promise<Session> => {
       const doc = new Y.Doc()
       const socket = new HocuspocusProviderWebsocket({
         url: WS_URL,
@@ -521,7 +536,7 @@ describe('collaboration WS bridge', () => {
           websocketProvider: socket,
           name: DOC_NAME,
           document: doc,
-          token: 'okb-agent-token',
+          token,
           onSynced: () => {
             clearTimeout(timer)
             sessions.push({ provider, socket, doc })
@@ -538,8 +553,10 @@ describe('collaboration WS bridge', () => {
       })
     }
 
-    await expect(declaring(cookie)).rejects.toThrow(/agent credentials|authentication failed/i)
-    await expect(declaring(null)).rejects.toThrow(/agent credentials|authentication failed/i)
+    await expect(declaring(cookie, '')).rejects.toThrow(/CSRF token|authentication failed/i)
+    await expect(declaring(cookie, 'okb-agent-token')).rejects.toThrow(/CSRF token|authentication failed/i)
+    await expect(declaring(cookie, await sessionToken(await drupalAdminCookie()))).rejects.toThrow(/CSRF token|authentication failed/i)
+    await expect(declaring(null, 'okb-agent-token')).rejects.toThrow(/authentication failed/i)
   })
 
   /**
@@ -585,7 +602,7 @@ describe('collaboration WS bridge', () => {
       // so a write in the same second as the checkpoint carries the identical
       // timestamp, which the reconcile has to catch on content instead.
       const marker = `probe-${Date.now()}`
-      const changed = await patchBody(cookie, probe.nid, `${marker}\n`)
+      const changed = await patchBody(cookie, probe.uuid, `${marker}\n`)
       expect(changed).toBeGreaterThanOrEqual(committed)
 
       const second = await open(cookie, docName)
@@ -630,7 +647,10 @@ describe('collaboration WS bridge', () => {
     const docName = `node:${probe.nid}`
     const said = `note-${Date.now()}`
     const anchor = { from: 0, to: 9, quote: 'something' }
+    // Filed under the connection's account: its name, and no via a person
+    // cannot hold.
     const note = { uid: 1, at: 1, text: said, via: 'Claude', anchor }
+    const filed = { uid: 1, name: 'admin', at: 1, text: said, anchor }
     const act = { uid: 1, at: 2, resolved: true }
     try {
       const session = await open(cookie, docName)
@@ -654,7 +674,7 @@ describe('collaboration WS bridge', () => {
         thread_id: 'c-1',
         msg_id: 'm-1',
         uid: 1,
-        data: note,
+        data: filed,
       })
       expect(stored[1]).toMatchObject({ msg_id: 'm-2', data: act })
 
@@ -693,13 +713,13 @@ describe('collaboration WS bridge', () => {
         thread_id: 'c-2',
         msg_id: 'm-3',
         uid: 1,
-        data: parting,
+        data: { ...parting, name: 'admin' },
       })
 
       // And the whole conversation outlives the session that said it.
       const second = await open(cookie, docName)
       expect([...second.doc.getMap('comments').values()])
-        .toEqual(expect.arrayContaining([note, parting]))
+        .toEqual(expect.arrayContaining([filed, { ...parting, name: 'admin' }]))
     }
     finally {
       await deletePage(cookie, probe.uuid)
@@ -1089,7 +1109,7 @@ describe('collaboration multi-peer settle', () => {
    * A second signed-in editor, with a seat on the probe space's editor roster —
    * signing in alone does not reach into a space.
    */
-  async function createEditorPeer(): Promise<{ uuid: string, uid: number, cookie: string, release: () => Promise<void> }> {
+  async function createEditorPeer(): Promise<{ uuid: string, uid: number, name: string, cookie: string, release: () => Promise<void> }> {
     const name = `okb121-settle-${Date.now()}`
     const created = await jsonApi<{ data: { id: string, attributes: { drupal_internal__uid: number } } }>(
       cookie,
@@ -1117,6 +1137,7 @@ describe('collaboration multi-peer settle', () => {
     return {
       uuid: created.data.id,
       uid: created.data.attributes.drupal_internal__uid,
+      name,
       cookie: await login(name),
       /**
        * The roster entry and the account, undone together.
@@ -1266,6 +1287,47 @@ describe('collaboration multi-peer settle', () => {
     }
   })
 
+  it('files a peer\'s message under that peer, whatever it names', { timeout: 120_000 }, async () => {
+    const peerB = await createEditorPeer()
+    try {
+      const probe = await createPage(cookie, 'something to discuss {#b-note}\n')
+      const docName = `node:${probe.nid}`
+      try {
+        const admin = await open(cookie, docName)
+        seedBlocks(admin.doc, [{ id: 'b-note', text: 'something to discuss' }])
+        await flushed(admin)
+
+        const editor = await open(peerB.cookie, docName)
+        await waitForText(editor.doc, 'something to discuss')
+        const comments = editor.doc.getMap('comments')
+        const forged = messageKey('b-note', 'c-1', 'm-1')
+        const own = messageKey('b-note', 'c-2', 'm-2')
+        comments.set(forged, { uid: ADMIN_UID, name: 'admin', at: 1, text: 'said as admin' })
+        comments.set(own, { uid: peerB.uid, name: 'admin', via: 'Claude', at: 2, text: 'said as myself' })
+        await flushed(editor)
+        await commitNow(cookie, probe.nid)
+
+        const stored = await storedComments(cookie, probe.nid)
+        expect(stored).toEqual([{
+          anchor: 'b-note',
+          thread_id: 'c-2',
+          msg_id: 'm-2',
+          uid: peerB.uid,
+          data: { uid: peerB.uid, name: peerB.name, at: 2, text: 'said as myself' },
+        }])
+        // The live document says the same, to every peer.
+        await expect.poll(() => admin.doc.getMap('comments').has(forged)).toBe(false)
+        expect(admin.doc.getMap('comments').get(own)).toMatchObject({ uid: peerB.uid, name: peerB.name })
+      }
+      finally {
+        await deletePage(cookie, probe.uuid)
+      }
+    }
+    finally {
+      await peerB.release()
+    }
+  })
+
   it('carries both peers\' contributions into Drupal when the session ends', { timeout: 120_000 }, async () => {
     const peerB = await createEditorPeer()
     try {
@@ -1384,7 +1446,7 @@ describe('collaboration multi-peer settle', () => {
         // deletion does. Coalesced into one, the server takes its baseline from
         // the already-trimmed text and there is no edit left to see — which is
         // the hydration rule working, not the case under test.
-        await new Promise(r => setTimeout(r, 1_500))
+        await flushed(editor)
         deleteFrom(editor.doc, 'b-trim', ' to remove.'.length)
         leave(editor)
 

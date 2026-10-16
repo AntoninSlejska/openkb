@@ -22,16 +22,19 @@ require __DIR__ . '/../all/base.settings.php';
 if ($env_type && file_exists(__DIR__ . '/../all/base-' . $env_type . '.settings.php')) {
   require __DIR__ . '/../all/base-' . $env_type . '.settings.php';
 }
-// Per env (localdev, claude-vm, dev, stage, live) settings, if present.
-if ($env && file_exists(__DIR__ . '/../all/env.' . $env . '.settings.php')) {
-  require __DIR__ . '/../all/env.' . $env . '.settings.php';
+// Per env (localdev, dev, stage, live) settings, if present. A claude-vm is
+// a localdev setup.
+$env_settings = $env === 'claude-vm' ? 'localdev' : $env;
+if ($env_settings && file_exists(__DIR__ . '/../all/env.' . $env_settings . '.settings.php')) {
+  require __DIR__ . '/../all/env.' . $env_settings . '.settings.php';
 }
 // Per env-mode (development or production) overrides, if present.
 if ($env_mode && file_exists(__DIR__ . '/../all/' . $env_mode . '.settings.php')) {
   require __DIR__ . '/../all/' . $env_mode . '.settings.php';
 }
 
-// Load local override settings if present (gitignored).
+// Load local override settings if present (gitignored, see
+// settings.local.php.example).
 if (file_exists(__DIR__ . '/settings.local.php')) {
   include __DIR__ . '/settings.local.php';
 }

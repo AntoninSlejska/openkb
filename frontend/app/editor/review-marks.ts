@@ -220,7 +220,7 @@ export function signOffRefusal(
  * The two refusal sentences `PageBlocks::refusalReason()` answers with,
  * keyed by the state that produces them, and without their subject.
  */
-const REFUSAL: Record<WaitingState, string | null> = {
+export const REFUSAL: Record<WaitingState, string | null> = {
   'reviewable': null,
   'awaiting-others': 'needs a second pair of eyes: its only contributor is the account approving it.',
   'unattributed': 'needs an identified edit before anybody can sign it off: nothing on record says who wrote it.',

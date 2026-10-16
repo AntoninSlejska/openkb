@@ -1,6 +1,7 @@
 import { defineEventHandler } from 'h3'
 import { DrupalJsonApiParams } from 'drupal-jsonapi-params'
 import { drupalFetch, publicDrupalBaseUrl, sitePermissions } from '../utils/drupal'
+import { resolveActor } from '../utils/actor'
 import { BACKEND_PERMISSION } from '#shared/utils/user'
 import { PAGE_CREATE_PERMISSION } from '#shared/utils/kb-spaces'
 import { canCreateSpace } from '../utils/spaces'
@@ -9,10 +10,10 @@ import { canCreateSpace } from '../utils/spaces'
  * GET /api/me  →  the session's server-derived identity, resolved from the
  * Drupal session cookie ({@link OkbUser}).
  *
- * Two JSON:API requests under the caller's cookie: the root document's
- * `meta.links.me` names the session user's UUID (absent when anonymous), then
- * the user resource supplies name, uid and the `user_picture` file. Anonymous
- * answers nulls with 200; only a broken backend is an error.
+ * The acting identity ({@link resolveActor}) names the uid, then the user
+ * resource supplies the name and the `user_picture` file. Anonymous — no
+ * carrier, or one Drupal does not honor — answers nulls with 200 and never
+ * reaches JSON:API, which is closed to it; only a broken backend is an error.
  *
  * `isAdmin`, `canCreateSpace` and `canCreatePage` ride along because the chrome
  * needs them before it draws, and this payload already loads once per page. All
@@ -22,40 +23,34 @@ import { canCreateSpace } from '../utils/spaces'
  * spaces a page may be created in is `canWrite` on `/api/spaces`.
  */
 
-interface JsonApiRoot {
-  meta?: { links?: { me?: { meta?: { id?: string } } } }
-}
-
-interface JsonApiUser {
-  data?: {
+interface JsonApiUsers {
+  data?: Array<{
     attributes?: {
       name?: string
       display_name?: string
-      drupal_internal__uid?: number
     }
-  }
+  }>
   included?: Array<{ type: string, attributes?: { uri?: { url?: string } } }>
 }
 
 /** The included `user_picture` file, absolutised onto the backend origin. */
-function pictureUrl(user: JsonApiUser): string | null {
+function pictureUrl(user: JsonApiUsers): string | null {
   const url = user.included?.find(file => file.type === 'file--file')?.attributes?.uri?.url
   if (!url) return null
   return url.startsWith('/') ? `${publicDrupalBaseUrl()}${url}` : url
 }
 
 export default defineEventHandler(async (event) => {
-  const root = await drupalFetch<JsonApiRoot>(event, '/jsonapi')
-  const uuid = root.meta?.links?.me?.meta?.id
-  if (!uuid) return { name: null, uid: null, picture: null, isAdmin: false, canCreateSpace: false, canCreatePage: false }
+  const { uid } = await resolveActor(event)
+  if (uid == null) return { name: null, uid: null, picture: null, isAdmin: false, canCreateSpace: false, canCreatePage: false }
 
   const params = new DrupalJsonApiParams()
-    .addFields('user--user', ['name', 'display_name', 'drupal_internal__uid', 'user_picture'])
+    .addFilter('drupal_internal__uid', String(uid))
+    .addFields('user--user', ['name', 'display_name', 'user_picture'])
     .addFields('file--file', ['uri'])
     .addInclude(['user_picture'])
-  const user = await drupalFetch<JsonApiUser>(event, `/jsonapi/user/user/${uuid}?${params.getQueryString({ encodeValuesOnly: true })}`)
-  const attrs = user.data?.attributes
-  const uid = attrs?.drupal_internal__uid ?? null
+  const user = await drupalFetch<JsonApiUsers>(event, `/jsonapi/user/user?${params.getQueryString({ encodeValuesOnly: true })}`)
+  const attrs = user.data?.[0]?.attributes
   const permissions = await sitePermissions(event)
   return {
     // Same precedence as Drupal's own getDisplayName() exposure elsewhere

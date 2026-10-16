@@ -13,6 +13,7 @@ import type { KbTool } from './types'
 export function updateBlocksTool(): KbTool {
   return {
     name: 'updateBlocks',
+    manifestName: 'update_blocks',
     description:
       "Edit a knowledge-base page's DRAFT block by block. Each op names the block "
       + 'it acts on by its `{#b-…}` id, which every read carries in the markdown: '

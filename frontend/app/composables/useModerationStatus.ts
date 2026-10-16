@@ -117,7 +117,7 @@ export function useModerationStatus(nid: Ref<number | undefined>, enabled: Ref<b
     busy.value = action
     if (action === 'publish') publishBlockers.value = []
     try {
-      const result = await requestFetch<{ status: ModerationStatus }>(`/api/node/${id}/${action}`, {
+      const result = await csrfFetch<{ status: ModerationStatus }>(`/api/node/${id}/${action}`, {
         method: 'POST',
       })
       // The write's own answer wins over any read still in flight.

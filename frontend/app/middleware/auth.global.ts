@@ -1,5 +1,5 @@
 // Global auth guard. Anonymous users see nothing — every route except
-// /access-denied + /user/login redirects them to /access-denied. Detection
+// /access-denied + the sign-in pages redirects them to /access-denied. Detection
 // is whatever Drupal session cookies are present in the request:
 //   - SSR: the incoming Request's Cookie header (useCookie picks them up)
 //   - Client nav: useCookie reads document.cookie for the SameSite-aware
@@ -11,7 +11,7 @@
 // no session on purpose — Drupal answers an anonymous arrival by sending the
 // visitor to the login page with a destination back here, and the guard would
 // eat that before it happened.
-const ANON_ROUTES = new Set(['/access-denied', '/user/login', '/oauth/authorize'])
+const ANON_ROUTES = new Set(['/access-denied', '/user/login', '/user/password', '/oauth/authorize'])
 
 function hasSessionCookie(): boolean {
   // useCookie returns a Ref; the value is populated from the request

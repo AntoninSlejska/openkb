@@ -35,6 +35,7 @@ const DEFAULT_TIMEOUT_SEC = 30
 export function waitForChangesTool(): KbTool {
   return {
     name: 'waitForChanges',
+    manifestName: 'wait_for_changes',
     description:
       'Wait for the page to change under you, and answer as soon as it does — '
       + 'this is how you collaborate with somebody who is editing right now. '

@@ -7,6 +7,7 @@ import {
   resetMocks,
   drupalMock,
   drupalToolsMock,
+  toolManifestMock,
   hocuspocusMock,
   kbReadMock,
   sessionRouterMock,
@@ -32,6 +33,7 @@ vi.mock('../drupal', () => drupalMock)
 vi.mock('../session-router', importOriginal => sessionRouterMock(importOriginal))
 vi.mock('../hocuspocus', () => hocuspocusMock)
 vi.mock('../drupal-tools', () => drupalToolsMock)
+vi.mock('../tool-manifest', () => toolManifestMock)
 
 const ACTOR = { token: 'tok-1', uid: 7, name: 'fago', via: 'Claude' }
 /** A person in the editor: same account is possible, an agent label is not. */
@@ -74,9 +76,25 @@ function session(name = 'node:7', remainingMs = 60_000) {
   return held
 }
 
+/** Timers are fake: lets a call reach its wait. */
+const tick = (ms: number) => vi.advanceTimersByTimeAsync(ms)
+
+/** Lets a wait run for `ms`, to its timeout or to what ends it sooner. */
+async function within<T>(ms: number, waiting: Promise<T>): Promise<T> {
+  await tick(ms)
+  return waiting
+}
+
 describe('waitForChanges', () => {
-  beforeEach(resetMocks)
-  afterEach(stopAllWatches)
+  beforeEach(() => {
+    resetMocks()
+    // Cursors carry wall-clock milliseconds, so Date stays real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  })
+  afterEach(() => {
+    stopAllWatches()
+    vi.useRealTimers()
+  })
 
   it('answers as soon as a thread is opened, and the cursor resumes after it', async () => {
     // One millisecond for everything: the cursor shares it with the thread.
@@ -91,7 +109,7 @@ describe('waitForChanges', () => {
       arguments: { path: 'intro', timeoutSec: 5 },
     })
     // A human says something while the agent is waiting on the call.
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await tick(20)
     applyComment(doc, HUMAN, { blockId: 'b-1', text: 'Can you add a source?' })
 
     const answer = await waiting
@@ -105,10 +123,10 @@ describe('waitForChanges', () => {
     expect((answer.content as any[])[0].text).toContain('Can you add a source?')
 
     // Resuming on the cursor answers what happened after it: nothing yet.
-    const next = await client.callTool({
+    const next = await within(1_000, client.callTool({
       name: 'waitForChanges',
       arguments: { path: 'intro', cursor, timeoutSec: 1 },
-    })
+    }))
     expect(next.structuredContent as any).toMatchObject({ events: [], editors: 1, restarted: false })
   })
 
@@ -139,10 +157,10 @@ describe('waitForChanges', () => {
     expect(events[0]).toMatchObject({ kind: 'comments', by: { name: 'editor1' } })
 
     // And the cursor it gave back is the log's, so the loop goes on from here.
-    const next = await client.callTool({
+    const next = await within(1_000, client.callTool({
       name: 'waitForChanges',
       arguments: { path: 'intro', kinds: ['comments'], cursor, timeoutSec: 1 },
-    })
+    }))
     expect((next.structuredContent as any).events).toEqual([])
   })
 
@@ -151,10 +169,10 @@ describe('waitForChanges', () => {
     const { client } = await connect()
     await client.listTools()
 
-    const { cursor } = (await client.callTool({
+    const { cursor } = (await within(1_000, client.callTool({
       name: 'waitForChanges',
       arguments: { path: 'intro', kinds: ['comments'], timeoutSec: 1 },
-    })).structuredContent as any
+    }))).structuredContent as any
 
     // The log goes — a restarted process, a document reloaded — and the human
     // says something while nothing is observing.
@@ -181,17 +199,17 @@ describe('waitForChanges', () => {
       name: 'waitForChanges',
       arguments: { path: 'intro', kinds: ['presence'], timeoutSec: 5 },
     })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await tick(20)
     leaveRoom()
     // Awareness moving is what makes the watch re-count the room.
     publishAwareness(doc, presenceCarrier(101), 101, { user: { name: 'editor1', uid: 3 } }, null)
 
     // The wait answers on the first event of the settle; the close is the next.
-    const { cursor } = (await waiting).structuredContent as any
-    const next = await client.callTool({
+    const { cursor } = (await within(5_000, waiting)).structuredContent as any
+    const next = await within(5_000, client.callTool({
       name: 'waitForChanges',
       arguments: { path: 'intro', cursor, timeoutSec: 5 },
-    })
+    }))
 
     const answer = next.structuredContent as any
     expect(answer.events).toEqual([
@@ -212,10 +230,10 @@ describe('waitForChanges', () => {
       name: 'waitForChanges',
       arguments: { path: 'intro', timeoutSec: 120 },
     })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await tick(20)
     expect(seats()).toBe(1)
 
-    const answer = (await waiting).structuredContent as any
+    const answer = (await within(200, waiting)).structuredContent as any
     expect(answer.events).toEqual([])
     expect(answer.cursor).toBeTruthy()
     // Nothing of a finished call is left on a session that outlives it.
@@ -229,10 +247,10 @@ describe('waitForChanges', () => {
 
     // The agent said this itself: hearing it back would re-trigger the loop.
     applyComment(doc, ACTOR, { blockId: 'b-1', text: 'Rewrote the intro.' })
-    const answer = await client.callTool({
+    const answer = await within(1_000, client.callTool({
       name: 'waitForChanges',
       arguments: { path: 'intro', timeoutSec: 1 },
-    })
+    }))
 
     expect((answer.structuredContent as any).events).toEqual([])
   })
@@ -250,7 +268,7 @@ describe('waitForChanges', () => {
       name: 'waitForChanges',
       arguments: { path: 'intro', kinds: ['comments'], timeoutSec: 5 },
     })
-    await new Promise(resolve => setTimeout(resolve, 20))
+    await tick(20)
     Y.transact(doc, () => {
       recordCommentMessage(doc, 'b-1', threadId, 'm-r', { uid: 3, at: Date.now(), resolved: true })
     }, { source: 'connection', connection: { context: { user: { uid: 3 } } } })
@@ -279,7 +297,7 @@ describe('waitForChanges', () => {
     })
     applyComment(doc, HUMAN, { blockId: 'b-1', text: 'Not what you asked for.' })
 
-    expect(((await waiting).structuredContent as any).events).toEqual([])
+    expect(((await within(1_000, waiting)).structuredContent as any).events).toEqual([])
   })
 
   it('answers at once when asked to wait for nothing, and resumes on the cursor', async () => {

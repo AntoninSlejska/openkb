@@ -25,9 +25,8 @@ const commitDocument = vi.fn()
 vi.mock('./hocuspocus', () => ({ useCheckpoint: () => checkpoint }))
 // A cookie carrier names its account and carries nothing: the collaboration
 // server carries the checkpoint and states whoever saved.
-vi.mock('./actor', () => ({
-  resolveActor: async () => ({ type: 'human', uid: 7, name: 'reviewer', via: null }),
-}))
+const resolveActor = vi.fn()
+vi.mock('./actor', () => ({ resolveActor: (...args: unknown[]) => resolveActor(...args) }))
 vi.mock('./commit', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./commit')>()
   return { ...actual, commitDocument }
@@ -44,6 +43,15 @@ describe('checkpointLiveDocument', () => {
     checkpoint.mockReset()
     commitDocument.mockReset()
     checkpoint.mockResolvedValue({ outcome: 'committed', committed: true })
+    resolveActor.mockResolvedValue({ type: 'human', uid: 7, name: 'reviewer', via: null })
+  })
+
+  it('refuses a cookie Drupal rejected before checkpointing anything', async () => {
+    resolveActor.mockResolvedValue({ type: 'anonymous', uid: null, name: null, via: null })
+
+    expect(await checkpointLiveDocument(hp(true), 'node:1', event({ cookie: 'SESS=stale' })))
+      .toMatchObject({ blocked: true, statusCode: 401 })
+    expect(checkpoint).not.toHaveBeenCalled()
   })
 
   it('checkpoints through the one entry point, as the caller', async () => {

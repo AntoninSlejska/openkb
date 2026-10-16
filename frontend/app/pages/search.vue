@@ -647,6 +647,7 @@ onMounted(() => {
                          no relevance to show. -->
                     <span
                       v-if="routeQuery"
+                      data-testid="search-row-score"
                       class="font-mono text-[10.5px] text-dimmed"
                       :title="`relevance ${page.score.toFixed(2)}`"
                     >
@@ -786,7 +787,11 @@ onMounted(() => {
             class="ai-summary__answer okb-prose"
             data-test="ai-summary-answer"
           >
-            <ComarkAnswer :text="summaryText" :citation-chips="summaryCitations" />
+            <ComarkAnswer
+              :text="summaryText"
+              :citation-chips="summaryCitations"
+              :streaming="summaryStatus === 'streaming' && lastAssistant === streamed"
+            />
           </div>
 
           <ChatAnswerState

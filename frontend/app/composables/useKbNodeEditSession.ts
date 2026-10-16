@@ -11,6 +11,8 @@ interface EditSessionOptions {
   nid: Ref<string | number | undefined>
   /** Re-read moderation after a save lands a forward draft. */
   refreshModeration: () => Promise<void>
+  /** The page's space slug, off the payload — where a deleted top-level page leaves to. */
+  spaceSlug: Ref<string | undefined>
 }
 
 /**
@@ -31,6 +33,7 @@ interface EditSessionOptions {
 export function useKbNodeEditSession(env: KbCePageContext, opts: EditSessionOptions) {
   const route = useRoute()
   const toast = useToast()
+  const { trailFor } = useKbOutline()
 
   const mode = ref<Mode>('read')
   const session = shallowRef<EditorSession | null>(null)
@@ -115,25 +118,47 @@ export function useKbNodeEditSession(env: KbCePageContext, opts: EditSessionOpti
     return false
   })
 
-  // Swap in once the collab session is synced and the editor is mounted. If the
-  // collab server can't be reached the local-first editor still works — go
-  // ahead after a timeout instead of hanging in 'preparing' forever.
+  /** 'preparing' outlasted the timeout: the collab server has not answered. */
+  const collabUnreachable = ref(false)
+
+  // Swap in once the collab session is synced and the editor is mounted. The
+  // editor hydrates only from a synced doc, so without the collab server it
+  // stays in 'preparing': the read view stays up, the provider keeps
+  // reconnecting, and after the timeout the chrome says so.
   let readyTimeout: ReturnType<typeof setTimeout> | null = null
+  function clearReadyTimeout() {
+    if (readyTimeout) clearTimeout(readyTimeout)
+    readyTimeout = null
+  }
   watch(mode, (m) => {
+    clearReadyTimeout()
+    collabUnreachable.value = false
     if (m === 'preparing') {
-      readyTimeout = setTimeout(() => {
-        if (mode.value === 'preparing') swap('edit')
-      }, 10000)
-    }
-    else if (readyTimeout) {
-      clearTimeout(readyTimeout)
-      readyTimeout = null
+      readyTimeout = setTimeout(() => { collabUnreachable.value = true }, 10000)
     }
     if (m === 'read') {
       session.value = null
       fmOpen.value = false
     }
   })
+  onScopeDispose(clearReadyTimeout)
+
+  /** Leaves 'preparing' for the read view; dropping `?edit` does the rest. */
+  function cancelEdit() {
+    if (mode.value !== 'preparing') return
+    const { edit: _drop, ...query } = route.query
+    navigateTo({ path: route.path, query }, { replace: true })
+    mode.value = 'read'
+  }
+
+  /** Remounts the edit session — a fresh provider — while unreachable. */
+  async function retryEdit() {
+    if (mode.value !== 'preparing' || !collabUnreachable.value) return
+    mode.value = 'read'
+    await nextTick()
+    startEdit()
+  }
+
   watchEffect(() => {
     if (mode.value !== 'preparing') return
     const s = session.value
@@ -179,12 +204,21 @@ export function useKbNodeEditSession(env: KbCePageContext, opts: EditSessionOpti
   // the second from also announcing what the first already reported.
   const deletedHere = ref(false)
 
-  function leaveDeletedPage() {
+  /** The parent page, else the space landing page, else home. */
+  function deletedPageExit(): string {
+    const parent = trailFor(route.path).nodes.at(-2)
+    if (parent) return parent.page.path
+    return opts.spaceSlug.value ? `/${opts.spaceSlug.value}` : '/'
+  }
+
+  async function leaveDeletedPage() {
     // Drop out of edit mode first: the editor's session belongs to a document
     // that no longer exists, and exiting through the normal path would try to
     // re-read the deleted page.
     mode.value = 'read'
-    return navigateTo('/')
+    await navigateTo(deletedPageExit())
+    // The sidebar tree still lists the deleted page until the page list is re-read.
+    await refreshNuxtData('okb-pages')
   }
 
   function onDeleted() {
@@ -219,8 +253,11 @@ export function useKbNodeEditSession(env: KbCePageContext, opts: EditSessionOpti
   // editor) does not re-run setup — onNuxtReady already fired. Watch the query
   // so that return reopens the editor. Non-immediate: the first load is
   // onNuxtReady's, and mutating mode mid-hydration re-creates the subtree.
+  // Back out of a `?edit` URL that never reached the editor drops the hidden
+  // edit surface, and its provider with it.
   watch(() => route.query.edit, (edit) => {
     if (edit !== undefined && mode.value === 'read') startEdit()
+    else if (edit === undefined && mode.value === 'preparing') mode.value = 'read'
   })
 
   // The title tracks the live frontmatter title while editing, and is the
@@ -239,7 +276,10 @@ export function useKbNodeEditSession(env: KbCePageContext, opts: EditSessionOpti
     fmOpen,
     editorInstance,
     title,
+    collabUnreachable,
     startEdit,
+    retryEdit,
+    cancelEdit,
     startEditAtBlock,
     goToBlockId,
     closeEditor,

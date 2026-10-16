@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { H3Event } from 'h3'
 import { searchKbPages } from './kb-search'
+import { makeEvent, stubFetch, type Reply } from '../test-support/h3'
 
 /**
  * The title-prefix read the `[[` picker and the search box's suggest share,
@@ -13,13 +13,6 @@ import { searchKbPages } from './kb-search'
  * against the real index.
  */
 
-function makeEvent(headers: Record<string, string> = { Cookie: 'SESS=x' }): H3Event {
-  const lower = Object.fromEntries(
-    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
-  )
-  return { context: {}, node: { req: { headers: lower } } } as unknown as H3Event
-}
-
 const ANSWER = {
   pages: [{
     id: 'entity:node/7:en',
@@ -31,21 +24,8 @@ const ANSWER = {
   }],
 }
 
-/** Records every call; answers Drupal's search routes. */
-function stubFetch(options: { status?: number, answer?: unknown, offline?: boolean } = {}) {
-  const calls: string[] = []
-  vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
-    calls.push(String(input))
-    if (options.offline) throw new TypeError('fetch failed')
-    const status = options.status ?? 200
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => options.answer ?? ANSWER,
-    } as unknown as Response
-  }))
-  return calls
-}
+/** Drupal's answer to every call: the fixture, unless `over` says otherwise. */
+const reply = (over: Reply = {}) => stubFetch({ '': { body: ANSWER, ...over } })
 
 beforeEach(() => {
   vi.stubGlobal('useRuntimeConfig', () => ({ drupalBaseUrl: 'http://drupal.test/' }))
@@ -57,38 +37,38 @@ afterEach(() => {
 
 describe('searchKbPages', () => {
   it('asks Drupal for the pages a typed prefix offers', async () => {
-    const calls = stubFetch()
+    const calls = reply()
     await searchKbPages(makeEvent(), { q: 'Rel' })
 
-    const url = new URL(calls[0]!)
+    const url = new URL(calls[0]!.url)
     expect(url.pathname).toBe('/openkb/search')
     expect(url.searchParams.get('title')).toBe('Rel')
     expect(url.searchParams.get('q')).toBeNull()
   })
 
   it('narrows the offers to a space when one is asked for', async () => {
-    const calls = stubFetch()
+    const calls = reply()
     await searchKbPages(makeEvent(), { q: 'Rel', space: 'team-wiki' })
-    expect(new URL(calls[0]!).searchParams.get('space')).toBe('team-wiki')
+    expect(new URL(calls[0]!.url).searchParams.get('space')).toBe('team-wiki')
 
-    const unscoped = stubFetch()
+    const unscoped = reply()
     await searchKbPages(makeEvent(), { q: 'Rel' })
-    expect(new URL(unscoped[0]!).searchParams.get('space')).toBeNull()
+    expect(new URL(unscoped[0]!.url).searchParams.get('space')).toBeNull()
   })
 
   it('lists the newest pages when the query is empty', async () => {
     // A bare `[[` opens the picker on this query: there is no prefix to match,
     // so the listing arm is what still offers pages.
-    const calls = stubFetch()
+    const calls = reply()
     await searchKbPages(makeEvent(), { q: '  ' })
 
-    const url = new URL(calls[0]!)
+    const url = new URL(calls[0]!.url)
     expect(url.searchParams.get('q')).toBe('')
     expect(url.searchParams.get('title')).toBeNull()
   })
 
   it('serves the row contract the picker and the suggest consume', async () => {
-    stubFetch()
+    reply()
     expect(await searchKbPages(makeEvent(), { q: 'Rel' })).toEqual({
       query: 'Rel',
       hits: [{
@@ -103,23 +83,38 @@ describe('searchKbPages', () => {
   })
 
   it('drops a row that names no page to link to', async () => {
-    stubFetch({ answer: { pages: [{ id: 'entity:node/7:en', title: 'Pathless' }] } })
+    reply({ body: { pages: [{ id: 'entity:node/7:en', title: 'Pathless' }] } })
     expect((await searchKbPages(makeEvent(), { q: 'Rel' })).hits).toEqual([])
   })
 
+  // What a viewer is offered is Drupal's to narrow (SearchTitlePrefixTest
+  // ::testForeignSpacesAreNeverOffered); that holds only if the suggest asks
+  // with the viewer's own session and nothing broader.
+  it('asks as the caller, so a viewer is offered only what the viewer may read', async () => {
+    const cookie = reply()
+    await searchKbPages(makeEvent({ Cookie: 'SESS=viewer' }), { q: 'Rel' })
+    expect(cookie[0]!.init.headers).toMatchObject({ Cookie: 'SESS=viewer' })
+    expect(cookie[0]!.init.headers).not.toHaveProperty('Authorization')
+
+    const bearer = reply()
+    await searchKbPages(makeEvent({ Authorization: 'Bearer viewer-token' }), { q: 'Rel' })
+    expect(bearer[0]!.init.headers).toMatchObject({ Authorization: 'Bearer viewer-token' })
+    expect(bearer[0]!.init.headers).not.toHaveProperty('Cookie')
+  })
+
   it('fails closed for an anonymous caller', async () => {
-    const calls = stubFetch()
+    const calls = reply()
     await expect(searchKbPages(makeEvent({}), { q: 'Rel' })).rejects.toMatchObject({ statusCode: 403 })
     expect(calls).toEqual([])
   })
 
   it('reports a Drupal that will not answer as unavailable', async () => {
-    stubFetch({ status: 500 })
+    reply({ status: 500 })
     await expect(searchKbPages(makeEvent(), { q: 'Rel' })).rejects.toMatchObject({ statusCode: 503 })
   })
 
   it('carries a refusal through rather than answering an empty list', async () => {
-    stubFetch({ status: 422 })
+    reply({ status: 422 })
     await expect(searchKbPages(makeEvent(), { q: 'Rel' })).rejects.toMatchObject({ statusCode: 422 })
   })
 })

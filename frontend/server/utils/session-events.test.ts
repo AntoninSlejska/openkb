@@ -27,7 +27,7 @@ import {
 
 const ACTOR: AgentActor = { token: 'tok-1', uid: 7, name: 'fago', via: 'Claude' }
 const FAST = { settleMs: 5, presenceMs: 5 }
-/** Longer than a settle window, short enough to keep the suite quick. */
+/** Longer than a settle window. */
 const SETTLED_MS = 60
 
 let humans = 0
@@ -57,7 +57,14 @@ function seen(log: ReturnType<typeof watch>, cursor?: string, kinds = ALL): Chan
 
 const ALL = ['comments', 'blocks', 'presence'] as const
 
-const settled = (): Promise<void> => new Promise(resolve => setTimeout(resolve, SETTLED_MS))
+/** Timers are fake: this runs every settle window that falls due. */
+const settled = (): Promise<void> => vi.advanceTimersByTimeAsync(SETTLED_MS).then(() => {})
+
+/** Lets a wait run to its timeout. */
+async function timedOut<T>(waiting: Promise<T>, ms: number): Promise<T> {
+  await vi.advanceTimersByTimeAsync(ms)
+  return waiting
+}
 
 /** Writes the way an agent session does — one transaction, carrying its seat. */
 function asAgent<T>(doc: AwareDoc, write: () => T): T {
@@ -75,8 +82,13 @@ function joinPeer(doc: AwareDoc, clientId: number, name: string, blockId?: strin
 describe('session events', () => {
   beforeEach(() => {
     humans = 1
+    // Cursors carry wall-clock milliseconds, so Date stays real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   })
-  afterEach(stopAllWatches)
+  afterEach(() => {
+    stopAllWatches()
+    vi.useRealTimers()
+  })
 
   it('reports a block once it settles, with what it now holds — not per keystroke', async () => {
     const doc = documentWith([['b-1', 'first'], ['b-2', 'second']])
@@ -205,7 +217,7 @@ describe('session events', () => {
   it('resumes from the cursor: what came before it is not served twice', async () => {
     const doc = documentWith([['b-1', 'first']])
     const log = watch(doc)
-    const first = await awaitChanges(log, undefined, ALL, 20)
+    const first = await timedOut(awaitChanges(log, undefined, ALL, 20), 20)
     applyComment(doc, ACTOR, { blockId: 'b-1', text: 'One.' })
 
     const answered = changesSince(log, first.cursor, ALL)
@@ -389,8 +401,8 @@ describe('session events', () => {
     applyComment(doc, ACTOR, { blockId: 'b-1', text: 'Now.' })
     expect((await waiting).events).toHaveLength(1)
 
-    const timedOut = await awaitChanges(log, cursor, ['presence'], 20)
-    expect(timedOut.events).toEqual([])
+    const empty = await timedOut(awaitChanges(log, cursor, ['presence'], 20), 20)
+    expect(empty.events).toEqual([])
   })
 
   it('a timeout of zero answers from the log and waits for nothing', async () => {
@@ -417,7 +429,7 @@ describe('session events', () => {
     const waiting = awaitChanges(log, cursor, ['presence'], 80)
     applyComment(doc, ACTOR, { blockId: 'b-1', text: 'Not for you.' })
 
-    expect((await waiting).events).toEqual([])
+    expect((await timedOut(waiting, 80)).events).toEqual([])
   })
 
   it('ends the loop when the last editor leaves', async () => {

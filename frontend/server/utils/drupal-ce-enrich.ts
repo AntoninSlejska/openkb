@@ -1,4 +1,5 @@
 import { citationsByBlock, markdownToTree, type AllowedHtml, type CitationSource } from '#shared/utils/comark-tree'
+import { highlightToTokens } from '#shared/utils/code-highlight'
 import { resolveMediaUuids } from './media'
 import { resolveCiteNids, resolveDocNids } from './doc-links'
 import { blockByline, hasRecord, parseBlockMeta, type BlockByline } from '#shared/page-blocks'
@@ -109,6 +110,7 @@ export async function enrichCePage(
     resolveDocs: nids => resolveDocNids(auth, nids),
     resolveCites: nids => resolveCiteNids(auth, nids),
     allowedHtml,
+    highlightCode: highlightToTokens,
     blockLinks: true,
   })
   const blockCitations = citationsByBlock(bodyTree)

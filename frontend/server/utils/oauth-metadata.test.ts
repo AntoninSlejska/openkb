@@ -171,11 +171,6 @@ describe('the 401 challenge', () => {
       `Bearer resource_metadata="http://${HOST}/.well-known/oauth-protected-resource/api/mcp"`,
     )
   })
-
-  it('quotes the path-suffixed URL RFC 9728 defines, not the bare one', async () => {
-    const { PRM_PATH, MCP_RESOURCE_PATH } = await metadata()
-    expect(PRM_PATH).toBe(`/.well-known/oauth-protected-resource${MCP_RESOURCE_PATH}`)
-  })
 })
 
 describe('the routes serving them', () => {

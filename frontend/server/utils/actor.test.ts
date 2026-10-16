@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { H3Event } from 'h3'
 import { forwardedAuthHeaders, resolveActor, ANONYMOUS_ACTOR } from './actor'
+import { makeEvent } from '../test-support/h3'
 
 /**
  * The actor contract every server-side consumer (commit attribution, rate
@@ -8,16 +8,6 @@ import { forwardedAuthHeaders, resolveActor, ANONYMOUS_ACTOR } from './actor'
  * (Bearer wins over cookie), identity resolves once per request through
  * `GET /openkb/agent/identity`, and `via` decides agent vs human.
  */
-
-function makeEvent(headers: Record<string, string>): H3Event {
-  const lower = Object.fromEntries(
-    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
-  )
-  return {
-    context: {},
-    node: { req: { headers: lower } },
-  } as unknown as H3Event
-}
 
 function stubIdentity(body: unknown, status = 200) {
   const impl = vi.fn(async () => ({

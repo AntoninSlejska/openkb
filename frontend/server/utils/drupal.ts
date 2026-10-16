@@ -1,5 +1,5 @@
 import type { H3Event } from 'h3'
-import { createError, getHeader } from 'h3'
+import { createError } from 'h3'
 import { SPACE_TYPE, type KbSpace } from '#shared/utils/kb-spaces'
 import type { InlineCommentRecord } from '#shared/block-comments'
 import { fetchUpstream, upstreamError, UPSTREAM_UNAVAILABLE } from './upstream'
@@ -25,8 +25,8 @@ import {
  * scope). Either way the carrier is forwarded so Drupal sees the acting account
  * and enforces per-role/per-scope permissions — the Nuxt layer grants nothing.
  *
- * Cookie-authed writes also need Drupal's X-CSRF-Token (fetched lazily per
- * session); token auth is not cookie-based and needs none.
+ * A cookie carrier includes the CSRF token the browser sent; Drupal checks it
+ * on cookie-authed writes (ADR 0019). Token auth needs none.
  *
  * Body writes send the value alone. The text format is Drupal's answer — the
  * body field's configured one, filled in on presave — so nothing here names
@@ -49,7 +49,11 @@ export function publicDrupalBaseUrl(): string {
   return (pub || drupalBaseUrl()).replace(/\/$/, '')
 }
 
-async function fetchCsrfToken(cookie: string): Promise<string | null> {
+/**
+ * Drupal's CSRF token for a session cookie; null when Drupal gives none.
+ * Only for checking a caller's token, never sent on (ADR 0019).
+ */
+export async function fetchCsrfToken(cookie: string): Promise<string | null> {
   const res = await fetchUpstream(`${drupalBaseUrl()}/session/token`, {
     headers: { Cookie: cookie },
   })
@@ -79,24 +83,10 @@ export async function drupalFetchWithAuth<T = unknown>(
     ...((init.headers as Record<string, string>) ?? {}),
   }
 
-  // CSRF token required for cookie-authed writes (POST/PATCH/DELETE).
-  if (method !== 'GET' && method !== 'HEAD' && auth.Cookie) {
-    const token = await fetchCsrfToken(auth.Cookie)
-    if (token) headers['X-CSRF-Token'] = token
-  }
-
   const res = await fetchUpstream(url, { ...init, headers })
   if (!res.ok) throw await upstreamError(res, `${method} ${path}`)
   if (res.status === 204) return null as T
   return (await res.json()) as T
-}
-
-export function drupalFetchWithCookie<T = unknown>(
-  cookie: string | undefined,
-  path: string,
-  init: RequestInit = {},
-): Promise<T> {
-  return drupalFetchWithAuth<T>(cookie ? { Cookie: cookie } : {}, path, init)
 }
 
 /** Forwarded-carrier headers for a raw Bearer token. */
@@ -471,60 +461,6 @@ export interface KbPagePatchExtra {
 }
 
 /**
- * Raw JSON:API PATCH of the body — the transport of the `/api/node/<nid>`
- * proxy only ([id].patch.ts). Every other write surface commits through
- * {@link commitKbPageWithAuth}; this one still speaks JSON:API, so it
- * fails with 400 on a page that already carries a forward draft (core
- * #2795279). The proxy's own future is part of the publish-action design
- * (OKB-20).
- */
-export function patchKbPageWithCookie(
-  cookie: string | undefined,
-  id: string,
-  body: string,
-  extra: KbPagePatchExtra = {},
-): Promise<number> {
-  return patchKbPageWithAuth(cookie ? { Cookie: cookie } : {}, id, body, extra)
-}
-
-export async function patchKbPageWithAuth(
-  auth: Record<string, string>,
-  id: string,
-  body: string,
-  extra: KbPagePatchExtra = {},
-): Promise<number> {
-  const result = await drupalFetchWithAuth<{ data?: { attributes?: { changed: string } } }>(
-    auth,
-    `/jsonapi/node/kb_page/${id}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({
-        data: {
-          type: 'node--kb_page',
-          id,
-          attributes: {
-            field_kb_body: { value: body },
-            ...(extra.attributes ?? {}),
-          },
-          ...(extra.relationships ? { relationships: extra.relationships } : {}),
-        },
-      }),
-    },
-  )
-  const iso = result?.data?.attributes?.changed
-  return iso ? Math.floor(new Date(iso).getTime() / 1000) : Math.floor(Date.now() / 1000)
-}
-
-export function patchKbPageBody(
-  event: H3Event,
-  id: string,
-  body: string,
-  extra: KbPagePatchExtra = {},
-): Promise<number> {
-  return patchKbPageWithCookie(getHeader(event, 'cookie'), id, body, extra)
-}
-
-/**
  * Write one revision through the moderation-aware commit route.
  *
  * Not a JSON:API PATCH: `kb_page` carries forward drafts, and JSON:API
@@ -764,10 +700,6 @@ export async function deleteKbPageWithAuth(
 ): Promise<void> {
   const path = `/jsonapi/node/kb_page/${id}`
   const headers: Record<string, string> = { Accept: 'application/vnd.api+json', ...auth }
-  if (auth.Cookie) {
-    const token = await fetchCsrfToken(auth.Cookie)
-    if (token) headers['X-CSRF-Token'] = token
-  }
 
   for (let attempt = 1; ; attempt++) {
     const res = await fetchUpstream(`${drupalBaseUrl()}${path}`, { method: 'DELETE', headers })
@@ -836,9 +768,8 @@ export function fetchInlineComments(
  * Makes the stored messages of one entity translation the ones stated.
  *
  * A full set, every time: coordinates that are not stated are dropped. Each
- * message names its own author — the collaboration server is the only party
- * that witnessed who typed which, and the endpoint takes every caller at its
- * word about that.
+ * message names its own author — the collaboration server witnessed who
+ * typed which, and it is the endpoint's only caller.
  *
  * @returns how many messages the call stored and dropped.
  */

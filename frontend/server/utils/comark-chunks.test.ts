@@ -168,6 +168,27 @@ ${Array.from({ length: 200 }, (_, i) => `- item ${i} ${filler(4, 'word')}`).join
     expect(chunks[0]!.text).toBe('Steps\n\npull the branch\nrun the suite')
   })
 
+  it('reads an image as its alt and title, in its place', async () => {
+    const chunks = await chunksOf(`## Flow {#b-1111}
+
+Before ![Request lifecycle diagram](https://example.com/flow.svg "Proxy to Drupal") after. {#b-2222}
+
+::image{media="0b7f0a1e-1111-4222-8333-444455556666" alt="Escalation ladder" #b-3333}
+::
+`)
+    expect(chunks[0]!.text).toBe('Flow\n\nBefore Request lifecycle diagram Proxy to Drupal after.\n\nEscalation ladder')
+  })
+
+  it('reads no source of an image, a data URI included', async () => {
+    const chunks = await chunksOf(`## Flow {#b-1111}
+
+![Sequence of the save operation](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=) {#b-2222}
+
+![](https://example.com/no-alt.png) {#b-3333}
+`)
+    expect(chunks[0]!.text).toBe('Flow\n\nSequence of the save operation')
+  })
+
   it('answers nothing for a page with no words', async () => {
     expect(await chunksOf('')).toEqual([])
   })

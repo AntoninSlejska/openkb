@@ -6,6 +6,16 @@ parameters:
   # files. Keep this file minimal so the default Drupal core services
   # remain in effect unless an override is explicit.
 
+  # Core's defaults, with the SameSite value the cookie-authed writes rely on
+  # stated here. The parameter is replaced whole, not merged.
+  session.storage.options:
+    gc_probability: 1
+    gc_divisor: 100
+    gc_maxlifetime: 200000
+    cookie_lifetime: 2000000
+    cookie_samesite: Lax
+    name_suffix: ''
+
   # CORS: the decoupled Nuxt frontend calls /ce-api/* with credentials; the
   # allowedOrigins list is populated at runtime by lupus_decoupled_cors.
   cors.config:

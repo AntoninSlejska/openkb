@@ -13,6 +13,11 @@ $config['system.logging']['error_level'] = 'verbose';
 // Disable render + dynamic page caches, route discovery debug.
 $settings['cache']['bins']['discovery_migration'] = 'cache.backend.memory';
 
+// Find modules under `tests/modules`. The dev and CI recipes install two:
+// - `vercel_ai_sdk_mock` (the chat with no API key)
+// - `openkb_search_test` (`openkb_hash`, the chunk index with no API key)
+$settings['extension_discovery_scan_tests'] = TRUE;
+
 // Allow non-hardened permissions on writable dirs during local dev.
 $settings['skip_permissions_hardening'] = TRUE;
 

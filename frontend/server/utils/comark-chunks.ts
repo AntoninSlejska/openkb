@@ -11,7 +11,7 @@
  * A token is estimated as four characters. The cap only has to keep a section
  * near the target and well under the provider's input limit.
  */
-import { collectText, type BlockReferences, type ComarkNode } from '#shared/utils/comark-tree'
+import type { BlockReferences, ComarkNode } from '#shared/utils/comark-tree'
 import { BLOCK_ID_PREFIX } from '#shared/page-blocks'
 
 export interface Chunk {
@@ -115,8 +115,32 @@ function blockText(node: ComarkNode): string {
   const [tag, , ...children] = node
   if (tag === 'table') return tableText(node)
   if (tag === 'ul' || tag === 'ol') return children.map(child => blockText(child)).filter(line => line !== '').join('\n')
-  if (tag === 'pre') return collectText(children).replace(/\s+$/, '')
-  return collectText(children).replace(/\s+/g, ' ').trim()
+  if (tag === 'pre') return wordsOf(children).replace(/\s+$/, '')
+  return wordsOf([node]).replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * The words below a node, an image's alt and title in its place.
+ *
+ * An image is often the only place a diagram's words are, so they are
+ * indexed; its source, a URL or a data URI, is not words.
+ */
+function wordsOf(nodes: ComarkNode[]): string {
+  let out = ''
+  for (const node of nodes) {
+    if (typeof node === 'string') {
+      out += node
+      continue
+    }
+    const [tag, props, ...children] = node
+    if (tag === 'img' || tag === 'image') {
+      const labels = [props?.alt, props?.title].filter((label): label is string => typeof label === 'string' && label.trim() !== '')
+      out += ` ${[...new Set(labels)].join(' ')} `
+      continue
+    }
+    out += wordsOf(children)
+  }
+  return out
 }
 
 /** A table as one line per body row, `Column: cell; Column: cell`. */

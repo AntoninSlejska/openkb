@@ -470,11 +470,33 @@ function commitIdentityOf(actor: AgentActor): CommitIdentity {
   return { token: actor.token, user: actor.name, via: actor.via ?? undefined }
 }
 
+/** Session starts in flight per key, so parallel first calls share one. */
+const starting = new Map<string, Promise<AgentSession>>()
+
 /**
  * Opens a session for this writer, seeds it, and registers it so the calls that
  * follow find the agent already in the room.
+ *
+ * MCP clients issue parallel calls: a second caller awaits the start already
+ * running, or rides the session it held meanwhile.
  */
-async function startAgentSession(
+function startAgentSession(
+  deps: RouterDeps,
+  key: string,
+  nid: number,
+  actor: AgentActor,
+): Promise<AgentSession> {
+  const running = starting.get(key)
+  if (running) return running
+  const run = (async () => {
+    const held = await heldAgentSession(key)
+    return held?.session ?? await openHeldAgentSession(deps, key, nid, actor)
+  })().finally(() => { starting.delete(key) })
+  starting.set(key, run)
+  return run
+}
+
+async function openHeldAgentSession(
   deps: RouterDeps,
   key: string,
   nid: number,
@@ -484,7 +506,7 @@ async function startAgentSession(
   captureHeadlessCarrier(deps, nid, identity)
   const session = await openAgentSession(deps.host, nid, actor)
   await hydrateHeadlessBody(deps, session, nid)
-  holdAgentSession(key, {
+  await holdAgentSession(key, {
     session,
     actor,
     persist: async () => {

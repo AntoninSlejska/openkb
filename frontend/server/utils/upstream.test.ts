@@ -17,9 +17,10 @@ describe('mapUpstreamStatus', () => {
     expect(mapUpstreamStatus(504)).toBe(503)
   })
 
-  it('passes actionable 4xx through untouched', () => {
-    expect(mapUpstreamStatus(404)).toBe(404)
-    expect(mapUpstreamStatus(403)).toBe(403)
+  // Each asks the caller for something of its own: sign in again (401), take
+  // the other write into account (409), back off (429).
+  it.each([401, 403, 404, 409, 422, 429])('passes an actionable %i through untouched', (status) => {
+    expect(mapUpstreamStatus(status)).toBe(status)
   })
 })
 

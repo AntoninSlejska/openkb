@@ -127,7 +127,7 @@ beforeEach(() => {
   document.body.innerHTML = ''
   fetchMock.mockReset()
   fetchMock.mockResolvedValue(SPACE)
-  vi.stubGlobal('$fetch', fetchMock)
+  vi.stubGlobal('csrfFetch', fetchMock)
   effects = []
   vi.stubGlobal('navigateTo', vi.fn(() => effects.push('navigate')))
   vi.stubGlobal('refreshNuxtData', vi.fn())

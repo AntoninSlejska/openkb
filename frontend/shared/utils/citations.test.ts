@@ -5,7 +5,7 @@ import { citeKey, citeState, citeTarget, citeUrlTitle } from './citations'
 /**
  * The body both sides of the wire version identically.
  *
- * `\Drupal\Tests\openkb_workflow\Kernel\PageBlocksTest::testVersionsAgreeWithTheEditor()`
+ * `\Drupal\Tests\openkb_workflow\Unit\PageBlocksTest::testVersionsAgreeWithTheEditor()`
  * asserts the same three versions for the same bytes: a citation made in the editor names
  * the version Drupal derives for that block, or the comparison staleness is
  * would answer at random.

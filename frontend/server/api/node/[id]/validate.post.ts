@@ -8,8 +8,8 @@ import type { FieldValue } from '../../../utils/entity-fields'
  * Dry-run validation proxy (OKB-53): forwards the changed field values —
  * session value shapes, keyed by JSON:API field name — to the openkb_schema
  * module's validate route, which runs TypedData validation against the node
- * without writing anything. The caller's session cookie is forwarded and the
- * CSRF token is handled by the shared Drupal bridge; access is the node's
+ * without writing anything. The caller's session cookie and CSRF token are
+ * forwarded (ADR 0019); access is the node's
  * update access, the same authority surface as the commit PATCH.
  *
  * Advisory only: the response feeds the FrontmatterForm's per-field error

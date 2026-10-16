@@ -12,7 +12,7 @@ import { resolveSpaceId } from '../../../utils/spaces'
  * The write goes to `POST /openkb/node/<nid>/space`, which reaches the published
  * revision *and* the forward draft — see
  * \Drupal\openkb_jsonapi\Controller\PageSpaceResource. Access is Drupal's:
- * update access on the page, and `field_space` field access.
+ * update access on the page, and write access in the target space.
  */
 export default defineEventHandler(async (event) => {
   const nid = Number(getRouterParam(event, 'id'))

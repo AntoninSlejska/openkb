@@ -17,7 +17,8 @@ export function isAuthFailedStatus(status: LiveStatus): boolean {
 
 export interface LiveCollabOptions {
   /** Y.Doc that backs the editor. Created by the caller so the same
-   *  instance can be passed to TipTap's Collaboration extension. */
+   *  instance can be passed to TipTap's Collaboration extension; destroyed
+   *  here on unmount. */
   ydoc: Y.Doc
   /** Document name on the Hocuspocus server, e.g. `node:42`. */
   name: string
@@ -63,6 +64,8 @@ export function useLiveCollab(options: LiveCollabOptions) {
   const deleted = ref(false)
 
   let metaObserver: (() => void) | null = null
+  let recreate: ((update: Uint8Array, origin: unknown, doc: Y.Doc, tr: Y.Transaction) => void) | null = null
+  let disposed = false
 
   onMounted(() => {
     persistence.value = new IndexeddbPersistence(options.localKey, options.ydoc)
@@ -77,14 +80,17 @@ export function useLiveCollab(options: LiveCollabOptions) {
       const p = persistence.value
       persistence.value = null
       Promise.resolve(p?.clearData()).catch(() => { /* best-effort */ }).finally(() => {
+        if (disposed) return
         // Re-mirror lazily on the next LOCAL edit: right after a checkpoint
         // the store is genuinely empty (the committed edits live in Drupal
         // now), and the mirror protects this tab's unsaved writing — a
         // server write (the checkpoint's own attribution snapshot, the
         // sidecar mirror) or a peer's edit must not resurrect it.
-        const recreate = (_update: Uint8Array, _origin: unknown, _doc: Y.Doc, tr: Y.Transaction): void => {
+        if (recreate) return
+        recreate = (_update, _origin, _doc, tr) => {
           if (!tr.local) return
-          options.ydoc.off('update', recreate)
+          options.ydoc.off('update', recreate!)
+          recreate = null
           if (!persistence.value) persistence.value = new IndexeddbPersistence(options.localKey, options.ydoc)
         }
         options.ydoc.on('update', recreate)
@@ -116,6 +122,7 @@ export function useLiveCollab(options: LiveCollabOptions) {
       url,
       name: options.name,
       document: options.ydoc,
+      token: csrfToken,
       onSynced: () => {
         synced.value = true
         if (checkpointBaseline < 0) {
@@ -152,7 +159,9 @@ export function useLiveCollab(options: LiveCollabOptions) {
   })
 
   onBeforeUnmount(() => {
+    disposed = true
     if (metaObserver) options.ydoc.getMap('_meta').unobserveDeep(metaObserver)
+    if (recreate) options.ydoc.off('update', recreate)
     provider.value?.destroy()
     persistence.value?.destroy()
   })

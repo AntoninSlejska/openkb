@@ -1,9 +1,10 @@
-import { defineEventHandler, getRouterParams, getQuery } from 'h3'
+import { defineEventHandler, getRouterParams, getQuery, createError } from 'h3'
 import { drupalBaseUrl } from '../../utils/drupal'
 import { fetchUpstream, relaySetCookie, upstreamError } from '../../utils/upstream'
 import { enrichCePage, type CePage } from '../../utils/drupal-ce-enrich'
 import { bodyAllowedHtml } from '../../utils/comark-allowed-html'
 import { forwardedAuthHeaders } from '../../utils/actor'
+import { drupalPath } from '../../utils/drupal-proxy'
 
 /**
  * Overrides nuxtjs-drupal-ce's built-in /api/drupal-ce/** passthrough.
@@ -19,7 +20,11 @@ import { forwardedAuthHeaders } from '../../utils/actor'
  */
 export default defineEventHandler(async (event) => {
   const params = getRouterParams(event).path ?? ''
-  const path = params ? '/' + (Array.isArray(params) ? params.join('/') : params) : ''
+  const param = drupalPath(Array.isArray(params) ? params.join('/') : params)
+  if (param === undefined) {
+    throw createError({ statusCode: 404, statusMessage: 'Not Found' })
+  }
+  const path = param ? '/' + param : ''
   const qs = new URLSearchParams(getQuery(event) as Record<string, string>).toString()
   const url = `${drupalBaseUrl()}/ce-api${path}${qs ? '?' + qs : ''}`
 

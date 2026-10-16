@@ -3,6 +3,7 @@ import { TextSelection } from '@tiptap/pm/state'
 import type { Transaction } from '@tiptap/pm/state'
 import { requestMediaSelection } from '~/composables/useMediaLibraryPicker'
 import { recordLinkSelection } from '~/editor/doc-link-selection'
+import { BUBBLE_REQUEST_KEY } from '~/editor/link-target'
 import { CITATION_TAG } from '#shared/utils/citations'
 
 type CalloutKind = 'info' | 'warning' | 'success' | 'danger'
@@ -173,6 +174,20 @@ export const comarkHandlers: Record<string, EditorHandler> = {
       return editor.chain().focus().setTextSelection(to).insertContent('[[')
     },
     isActive: editor => editor.isActive('docLink'),
+  },
+  // Opens the link bubble's URL field (editor/components/LinkTargetBubble.vue)
+  // in place of UEditor's `prompt()` handler; empty on words without a link.
+  link: {
+    canExecute: editor => !editor.state.selection.empty || editor.isActive('link'),
+    execute: (editor) => {
+      const { from, to } = editor.state.selection
+      return editor.chain().command(({ tr }) => {
+        tr.setMeta(BUBBLE_REQUEST_KEY, { focus: 'url', from, to })
+        return true
+      })
+    },
+    isActive: editor => editor.isActive('link'),
+    isDisabled: editor => editor.state.selection.empty && !editor.isActive('link'),
   },
   // Types the `[^` the same picker's citation mode is keyed on. A citation
   // carries no words of its own, so it goes after a selection rather than

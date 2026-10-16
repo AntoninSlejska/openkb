@@ -1,44 +1,40 @@
-import { createError, defineEventHandler, getHeader, readBody, sendStream, setHeader } from 'h3'
+import { createError, defineEventHandler, readBody, sendStream, setHeader } from 'h3'
 import { useRuntimeConfig } from '#imports'
 import { drupalBaseUrl } from '../utils/drupal'
+import { forwardedAuthHeaders } from '../utils/actor'
+import { fetchUpstream, upstreamError, UPSTREAM_UNAVAILABLE } from '../utils/upstream'
 
 // Proxy the AI-SDK UI-message stream through Drupal's vercel_ai_sdk module.
 // The Drupal endpoint is the source of truth — no Nuxt-side mock fallback.
-// Forwards the session cookie so per-user access checks apply.
-// 401/403 from upstream surface as 401 here so the chat drawer can render a
-// friendly "log in to chat" state.
+// Forwards the caller's one carrier so per-user access checks apply: a Bearer
+// token, else the session cookie with the CSRF token the browser sent (ADR 0019).
+// An upstream 401, or a 403 for a caller with no carrier, surfaces as 401 so
+// the chat drawer renders its "log in to chat" state. A 403 for a caller with
+// a carrier (missing/stale CSRF token, no chat permission) stays a 403. Every
+// other failure maps like any other
+// upstream call (server/utils/upstream.ts): a 400 for a turn the bridge
+// refused stays a 400, which the drawer words apart from an outage.
 
 export default defineEventHandler(async (event) => {
   const body = (await readBody(event).catch(() => ({}))) as Record<string, unknown>
-  const cookie = getHeader(event, 'cookie')
-
-  const upstream = `${drupalBaseUrl()}/vercel-ai/chat`
 
   const agentId
     = (typeof body.agentId === 'string' && body.agentId !== '' ? body.agentId : null)
       ?? (useRuntimeConfig(event).public.chatAgentId as string | undefined)
       ?? 'openkb'
 
-  let res: Response
-  try {
-    res = await fetch(upstream, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'text/event-stream',
-        ...(cookie ? { Cookie: cookie } : {}),
-      },
-      body: JSON.stringify({ ...body, agentId }),
-    })
-  }
-  catch (err) {
-    throw createError({
-      statusCode: 502,
-      statusMessage: `vercel_ai_sdk unreachable at ${upstream}: ${(err as Error).message}. Enable the module: docker compose exec cli drush en vercel_ai_sdk -y`,
-    })
-  }
+  const auth = forwardedAuthHeaders(event)
+  const res = await fetchUpstream(`${drupalBaseUrl()}/vercel-ai/chat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      ...auth,
+    },
+    body: JSON.stringify({ ...body, agentId }),
+  })
 
-  if (res.status === 401 || res.status === 403) {
+  if (res.status === 401 || (res.status === 403 && !Object.keys(auth).length)) {
     throw createError({
       statusCode: 401,
       statusMessage: 'Authentication required',
@@ -46,12 +42,10 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => '')
-    throw createError({
-      statusCode: res.status || 502,
-      statusMessage: `vercel_ai_sdk responded ${res.status}: ${text.slice(0, 200)}`,
-    })
+  if (!res.ok) throw await upstreamError(res, 'vercel_ai_sdk chat')
+  if (!res.body) {
+    console.error('[upstream] vercel_ai_sdk chat answered without a body')
+    throw createError({ statusCode: 503, statusMessage: UPSTREAM_UNAVAILABLE })
   }
 
   // Mirror SSE headers so the AI SDK transport recognises the stream.

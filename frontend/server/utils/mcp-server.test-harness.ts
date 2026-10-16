@@ -27,6 +27,7 @@ export const findKbPageByPath = vi.fn()
 export const fetchFrontmatterSpecs = vi.fn()
 export const listDrupalTools = vi.fn()
 export const callDrupalTool = vi.fn()
+export const enabledSessionTools = vi.fn()
 
 /**
  * The write tools route through the session router; the router itself is
@@ -55,6 +56,23 @@ export const drupalToolsMock = {
   listDrupalTools: (...a: unknown[]) => listDrupalTools(...a),
   callDrupalTool: (...a: unknown[]) => callDrupalTool(...a),
 }
+
+/**
+ * Drupal's tool manifest (tool-manifest.ts, covered there); every session tool
+ * is enabled unless a case says otherwise.
+ */
+export const toolManifestMock = {
+  enabledSessionTools: (...a: unknown[]) => enabledSessionTools(...a),
+}
+
+/** Every session tool, by the name Drupal's tool manifest lists it under. */
+export const SESSION_TOOLS = [
+  'comment_on_block',
+  'get_page_for_editing',
+  'update_blocks',
+  'update_fields',
+  'wait_for_changes',
+]
 
 export async function sessionRouterMock(
   importOriginal: <T>() => Promise<T>,
@@ -145,6 +163,7 @@ export function resetMocks(): void {
   joinAgentSession.mockReset()
   listDrupalTools.mockReset().mockResolvedValue([])
   callDrupalTool.mockReset().mockResolvedValue({ content: [{ type: 'text', text: 'relayed' }] })
+  enabledSessionTools.mockReset().mockResolvedValue(new Set(SESSION_TOOLS))
 }
 
 /** A client and the server it drives, over the in-memory transport. */

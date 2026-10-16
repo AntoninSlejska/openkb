@@ -19,6 +19,11 @@ services:
       # Random local port — find it with `docker compose port mariadb 3306`.
       - "127.0.0.1::3306"
 
+  mailpit:
+    ports:
+      # Random local port — find it with `docker compose port mailpit 8025`.
+      - "127.0.0.1::8025"
+
   frontend:
     environment:
       # Nuxt listens on the *published* port: DRUPAL_FRONTEND_BASE_URL carries

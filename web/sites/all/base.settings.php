@@ -58,9 +58,3 @@ if (php_sapi_name() == 'cli' && $drupal_base_url) {
 
 // State cache: see https://www.drupal.org/node/3177901.
 $settings['state_cache'] = TRUE;
-
-// Drupal hides modules under `tests/modules` from the extension scanner unless
-// this flag is on. Three the site installs live there: `ai_test` (`echoai`, the
-// no-key chat backend), `vercel_ai_sdk_mock` (the chat with no API key) and
-// `openkb_search_test` (`openkb_hash`, the chunk index with no API key).
-$settings['extension_discovery_scan_tests'] = TRUE;

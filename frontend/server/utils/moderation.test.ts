@@ -6,6 +6,7 @@ import {
   publishedContent,
 } from './moderation'
 import type { FieldSpec } from './entity-fields'
+import { stubFetch } from '../test-support/h3'
 
 /**
  * Pins the wire shape of the two document-level moderation writes (OKB-84).
@@ -15,24 +16,6 @@ import type { FieldSpec } from './entity-fields'
  * the whole contract: a publish that forgot the state would write a draft, and
  * a revert that included one would publish the content it was told to discard.
  */
-
-function stubFetch(responses: Record<string, { status?: number, body?: unknown }> = {}) {
-  const calls: Array<{ url: string, init: RequestInit }> = []
-  const impl = vi.fn(async (input: string | URL, init: RequestInit = {}) => {
-    const url = String(input)
-    calls.push({ url, init })
-    const match = Object.entries(responses).find(([path]) => url.includes(path))
-    const { status = 200, body = {} } = match?.[1] ?? {}
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => body,
-      text: async () => JSON.stringify(body),
-    } as unknown as Response
-  })
-  vi.stubGlobal('fetch', impl)
-  return calls
-}
 
 const AUTH = { Cookie: 'SESS=abc' }
 const CHANGED = { data: { attributes: { changed: '2026-07-26T10:00:00+00:00' } } }

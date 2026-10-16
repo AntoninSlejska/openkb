@@ -1,0 +1,15 @@
+<?php
+
+/**
+ * @file
+ * Local-only secrets and overrides.
+ *
+ * Copy to settings.local.php (gitignored) and edit as needed. Anything set
+ * there takes precedence over the layered settings under ../all/ because the
+ * site-level settings.php sources it last.
+ *
+ * Examples:
+ * - $settings['hash_salt'] = '...';
+ * - $config['ai_provider_openai.settings']['api_key'] = '...';
+ * - $databases['default']['default']['host'] = '127.0.0.1';
+ */

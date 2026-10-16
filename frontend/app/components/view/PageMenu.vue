@@ -154,7 +154,7 @@ async function confirmDelete() {
   if (deleting.value) return
   deleting.value = true
   try {
-    await $fetch(`/api/node/${props.nid}`, { method: 'DELETE' })
+    await csrfFetch(`/api/node/${props.nid}`, { method: 'DELETE' })
     confirmOpen.value = false
     emit('deleted')
     toast.add({

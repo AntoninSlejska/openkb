@@ -75,6 +75,7 @@ function copyBlockLink(event: MouseEvent): void {
 const editSession = useKbNodeEditSession(env, {
   nid: computed(() => props.nid),
   refreshModeration,
+  spaceSlug: computed(() => (props.space?.path ? spaceSlug(props.space.path) : undefined)),
 })
 const {
   mode,
@@ -83,7 +84,10 @@ const {
   fmOpen,
   editorInstance,
   title,
+  collabUnreachable,
   startEdit,
+  retryEdit,
+  cancelEdit,
   startEditAtBlock,
   closeEditor,
   save,
@@ -380,11 +384,14 @@ const { wide } = useSidePane()
         :can-edit="env.canEdit.value"
         :can-delete="env.canDelete.value"
         :mode="mode"
+        :collab-unreachable="collabUnreachable"
         :title="title"
         :history-href="env.historyHref.value"
         :markdown-href="rawHref"
         @revert="revertToPublished"
         @edit="startEdit"
+        @retry="retryEdit"
+        @cancel="cancelEdit"
         @deleted="onDeleted"
       />
     </template>

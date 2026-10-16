@@ -34,3 +34,28 @@ $settings['trusted_host_patterns'][] = '^127\.0\.0\.1$';
 if ($opensearch_url = getenv('OPENSEARCH_URL')) {
   $config['ai_vdb_provider_opensearch.settings']['connector_config']['url'] = $opensearch_url;
 }
+
+// Outgoing mail. The installed php_mail plugin needs an MTA, which the image
+// lacks. MAILER_DSN switches to core's Symfony mailer with that transport,
+// e.g. smtp://user:pass@smtp.example.com:587. A DSN without scheme or host is
+// ignored.
+if ($mailer_dsn = getenv('MAILER_DSN')) {
+  $dsn = parse_url($mailer_dsn);
+  if (!empty($dsn['scheme']) && !empty($dsn['host'])) {
+    parse_str($dsn['query'] ?? '', $mailer_options);
+    $config['system.mail']['interface']['default'] = 'symfony_mailer';
+    $config['system.mail']['mailer_dsn'] = [
+      'scheme' => $dsn['scheme'],
+      'host' => $dsn['host'],
+      'user' => isset($dsn['user']) ? rawurldecode($dsn['user']) : NULL,
+      'password' => isset($dsn['pass']) ? rawurldecode($dsn['pass']) : NULL,
+      'port' => $dsn['port'] ?? NULL,
+      'options' => $mailer_options,
+    ];
+  }
+}
+
+// The sender of every mail the site sends.
+if ($mail_from = getenv('MAIL_FROM')) {
+  $config['system.site']['mail'] = $mail_from;
+}

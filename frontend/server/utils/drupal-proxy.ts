@@ -1,5 +1,6 @@
 import type { H3Event } from 'h3'
-import { proxyRequest, getRequestURL, createError } from 'h3'
+import { proxyRequest, getRouterParam, getRequestURL, createError } from 'h3'
+import { drupalBaseUrl } from './drupal'
 
 /**
  * Same-origin passthrough to Drupal for the media-library dialog.
@@ -18,24 +19,50 @@ import { proxyRequest, getRequestURL, createError } from 'h3'
  * otherwise consume every urlencoded or multipart POST body before this proxy
  * sees it.
  */
-export function proxyToDrupal(event: H3Event) {
-  const base = (useRuntimeConfig().drupalBaseUrl as string).replace(/\/$/, '')
-  const url = getRequestURL(event)
-  return proxyRequest(event, `${base}${url.pathname}${url.search}`)
-}
 
 /**
- * Static-asset variant for the /core, /files, /modules, /sites and /themes
- * prefixes: the dialog only needs CSS/JS/fonts/images from those paths, so
- * anything else — /core/install.php and friends — is rejected instead of
- * exposing Drupal's PHP entry points on the app origin.
+ * The /core, /files, /modules, /sites and /themes prefixes serve the dialog
+ * CSS/JS/fonts/images only — /core/install.php and friends stay off the app
+ * origin.
  */
 const STATIC_ASSET_EXT = /\.(?:css|js|mjs|map|json|woff2?|ttf|eot|otf|svg|png|jpe?g|gif|webp|avif|ico)$/i
 
-export function proxyStaticAsset(event: H3Event) {
-  const url = getRequestURL(event)
-  if (!STATIC_ASSET_EXT.test(url.pathname)) {
+/**
+ * The router param as a path to append to a Drupal prefix: each segment fully
+ * decoded, then percent-encoded, so `fetch` gets no tab, CR, LF, `#`, `?` or
+ * `\` to strip or resolve. Undefined, i.e. refused:
+ * - an empty, `.` or `..` segment; one trailing slash is fine
+ * - a segment that decodes to one of those or holds a `/` or `\`
+ */
+export function drupalPath(param: string): string | undefined {
+  const trailing = param.endsWith('/') ? '/' : ''
+  const path = trailing ? param.slice(0, -1) : param
+  if (path === '') return trailing ? undefined : ''
+  const segments: string[] = []
+  for (const segment of path.split('/')) {
+    let decoded: string
+    try {
+      decoded = decodeURIComponent(segment)
+    }
+    catch {
+      return undefined
+    }
+    if (/^\.{0,2}$/.test(decoded) || /[/\\]/.test(decoded)) return undefined
+    segments.push(encodeURIComponent(decoded))
+  }
+  return segments.join('/') + trailing
+}
+
+/**
+ * Proxies the request to `${base}/${prefix}/${path}${search}`, the path being
+ * the route's `[...path]` param through {@link drupalPath}. 404 when that
+ * refuses it and, with `assets`, for anything but a static asset.
+ */
+export function drupalPassthrough(event: H3Event, prefix: string, { assets = false } = {}) {
+  const param = drupalPath(getRouterParam(event, 'path') ?? '')
+  if (param === undefined || (assets && !STATIC_ASSET_EXT.test(param))) {
     throw createError({ statusCode: 404, statusMessage: 'Not Found' })
   }
-  return proxyToDrupal(event)
+  const path = param ? `${prefix}/${param}` : prefix
+  return proxyRequest(event, `${drupalBaseUrl()}/${path}${getRequestURL(event).search}`)
 }

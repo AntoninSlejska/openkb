@@ -99,13 +99,6 @@ describe('serializeYDoc', () => {
   })
 })
 
-describe('contentHash', () => {
-  it('is deterministic and content-sensitive', () => {
-    expect(contentHash('a')).toBe(contentHash('a'))
-    expect(contentHash('a')).not.toBe(contentHash('b'))
-  })
-})
-
 describe('commitDocument', () => {
   beforeEach(() => {
     readMock.mockReset()

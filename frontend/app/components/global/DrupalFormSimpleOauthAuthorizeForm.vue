@@ -15,6 +15,8 @@ const props = defineProps<{
   scopes: { name: string, description: string }[]
   /** Where deciding sends the browser, either way. */
   callback: string
+  /** Why this person may not allow the client; Deny is then all the form offers. */
+  refusal?: string
   /** Drupal's own form attributes. */
   attributes?: Record<string, unknown>
   method: string
@@ -54,30 +56,40 @@ onMounted(() => {
     <div class="w-full max-w-lg rounded-(--okb-radius) bg-default p-8 shadow-[0_0_0_1px_var(--ui-border)]">
       <ChromeLogo class="mb-5" />
 
-      <h1 class="mb-4 text-[20px] font-bold tracking-tight text-highlighted">
-        Allow <span data-testid="consent-client">{{ client }}</span> to use OpenKnowledgebase
-      </h1>
+      <template v-if="refusal">
+        <h1 class="mb-4 text-[20px] font-bold tracking-tight text-highlighted">
+          <span data-testid="consent-client">{{ client }}</span> cannot be connected here
+        </h1>
+        <p data-testid="consent-refusal" class="mb-5 text-[13.5px] leading-relaxed text-toned">
+          {{ refusal }}
+        </p>
+      </template>
+      <template v-else>
+        <h1 class="mb-4 text-[20px] font-bold tracking-tight text-highlighted">
+          Allow <span data-testid="consent-client">{{ client }}</span> to use OpenKnowledgebase
+        </h1>
 
-      <h2 class="mb-2 text-[13px] font-semibold tracking-tight text-highlighted">
-        What it will be allowed to do
-      </h2>
-      <ul
-        v-if="scopes.length"
-        data-testid="consent-scopes"
-        class="mb-5 flex flex-col gap-1.5"
-      >
-        <li
-          v-for="scope in scopes"
-          :key="scope.name"
-          class="flex items-start gap-2 text-[13.5px] leading-relaxed text-toned"
+        <h2 class="mb-2 text-[13px] font-semibold tracking-tight text-highlighted">
+          What it will be allowed to do
+        </h2>
+        <ul
+          v-if="scopes.length"
+          data-testid="consent-scopes"
+          class="mb-5 flex flex-col gap-1.5"
         >
-          <UIcon name="i-lucide-check" class="mt-1 size-4 shrink-0 text-(--color-success-600)" />
-          <span>{{ scope.description || scope.name }}</span>
-        </li>
-      </ul>
-      <p v-else class="mb-5 text-[13.5px] leading-relaxed text-toned">
-        Nothing at all — the request names no access.
-      </p>
+          <li
+            v-for="scope in scopes"
+            :key="scope.name"
+            class="flex items-start gap-2 text-[13.5px] leading-relaxed text-toned"
+          >
+            <UIcon name="i-lucide-check" class="mt-1 size-4 shrink-0 text-(--color-success-600)" />
+            <span>{{ scope.description || scope.name }}</span>
+          </li>
+        </ul>
+        <p v-else class="mb-5 text-[13.5px] leading-relaxed text-toned">
+          Nothing at all — the request names no access.
+        </p>
+      </template>
 
       <p v-if="callback" class="mb-1 text-[11.5px] text-muted">
         Either way you are sent back to

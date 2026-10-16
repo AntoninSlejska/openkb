@@ -56,7 +56,7 @@ async function save(next: RosterRow[]) {
   saving.value = true
   error.value = null
   try {
-    const updated = await $fetch<KbSpaceDetail>(`/api/spaces/${props.space.slug}`, {
+    const updated = await csrfFetch<KbSpaceDetail>(`/api/spaces/${props.space.slug}`, {
       method: 'PATCH',
       body: {
         managers: next.filter(row => row.role === 'manager').map(row => row.id),

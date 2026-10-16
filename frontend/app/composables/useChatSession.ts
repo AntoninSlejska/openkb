@@ -12,6 +12,9 @@ export const TRANSPORT_ERROR = 'The chat service could not be reached. Try again
 /** The same, for the one status a reader can act on. */
 export const AUTH_ERROR = 'Log in to ask OpenKnowledgebase.'
 
+/** What the reader is told when the endpoint refused the turn as sent. */
+export const REQUEST_ERROR = 'OpenKnowledgebase could not take that question as sent. Reload the page and ask again.'
+
 /**
  * One conversation's worth of state. Every caller that wants a thread of its
  * own — the search page's AI summary — calls this; the chat panel asks for
@@ -28,6 +31,7 @@ export function useChatSession() {
   const chat = new Chat<UIMessage>({
     transport: new DefaultChatTransport({
       api: '/api/chat',
+      headers: async () => ({ 'X-CSRF-Token': await csrfToken() }),
       fetch: async (input, init) => {
         httpStatus.value = null
         let response: Response
@@ -43,8 +47,11 @@ export function useChatSession() {
         if (response.ok) return response
         httpStatus.value = response.status
         // The SDK throws with the response body — a JSON blob or an HTML error
-        // page, neither of which is a sentence to show a reader.
-        throw new Error(response.status === 401 ? AUTH_ERROR : TRANSPORT_ERROR)
+        // page, neither of which is a sentence to show a reader. A refused
+        // turn is not an outage: retrying the same request changes nothing.
+        if (response.status === 401) throw new Error(AUTH_ERROR)
+        if (response.status === 400) throw new Error(REQUEST_ERROR)
+        throw new Error(TRANSPORT_ERROR)
       },
     }),
   })

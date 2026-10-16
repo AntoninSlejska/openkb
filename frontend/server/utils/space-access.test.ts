@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { H3Event } from 'h3'
 import { atLeast, spaceAccessBySlug, spaceAccessMap } from './space-access'
+import { makeEvent, stubFetch, type Reply } from '../test-support/h3'
 
 /**
  * The frontend's copy of Drupal's access answer, and what happens when there
@@ -13,33 +13,13 @@ import { atLeast, spaceAccessBySlug, spaceAccessMap } from './space-access'
  * page.
  */
 
-function makeEvent(headers: Record<string, string> = { Cookie: 'SESS=x' }): H3Event {
-  const lower = Object.fromEntries(
-    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
-  )
-  return { context: {}, node: { req: { headers: lower } } } as unknown as H3Event
-}
-
 const SPACES = [
   { slug: 'team-wiki', name: 'Team Wiki', description: 'Notes.', access: 'manage', moderated: true },
   { slug: 'general', name: 'General', description: '', access: 'read', moderated: false },
 ]
 
-function stubFetch(reply: { status?: number, body?: unknown, offline?: boolean } = {}) {
-  const calls: string[] = []
-  vi.stubGlobal('fetch', vi.fn(async (input: string | URL) => {
-    calls.push(String(input))
-    if (reply.offline) throw new TypeError('fetch failed')
-    const status = reply.status ?? 200
-    return {
-      ok: status >= 200 && status < 300,
-      status,
-      json: async () => reply.body ?? { spaces: SPACES },
-      text: async () => JSON.stringify(reply.body ?? { spaces: SPACES }),
-    } as unknown as Response
-  }))
-  return calls
-}
+/** Drupal's answer to every call: the fixture, unless `over` says otherwise. */
+const reply = (over: Reply = {}) => stubFetch({ '': { body: { spaces: SPACES }, ...over } })
 
 beforeEach(() => {
   vi.stubGlobal('useRuntimeConfig', () => ({ drupalBaseUrl: 'http://drupal.test/' }))
@@ -51,13 +31,13 @@ afterEach(() => {
 
 describe('spaceAccessMap', () => {
   it('reads the map from Drupal as the caller', async () => {
-    const calls = stubFetch()
+    const calls = reply()
     expect(await spaceAccessMap(makeEvent())).toEqual(SPACES)
-    expect(calls).toEqual(['http://drupal.test/openkb/spaces'])
+    expect(calls.map(call => call.url)).toEqual(['http://drupal.test/openkb/spaces'])
   })
 
   it('reads once per request, however many consumers ask', async () => {
-    const calls = stubFetch()
+    const calls = reply()
     const event = makeEvent()
     await Promise.all([spaceAccessMap(event), spaceAccessMap(event)])
     await spaceAccessMap(event)
@@ -65,28 +45,28 @@ describe('spaceAccessMap', () => {
   })
 
   it('raises for an anonymous caller, without asking', async () => {
-    const calls = stubFetch()
+    const calls = reply()
     await expect(spaceAccessMap(makeEvent({}))).rejects.toMatchObject({ statusCode: 403 })
     expect(calls).toEqual([])
   })
 
   it('raises when Drupal is unreachable — never an empty answer', async () => {
-    stubFetch({ offline: true })
+    reply({ offline: true })
     await expect(spaceAccessMap(makeEvent())).rejects.toMatchObject({ statusCode: 503 })
   })
 
   it('raises when Drupal refuses the caller', async () => {
-    stubFetch({ status: 403 })
+    reply({ status: 403 })
     await expect(spaceAccessMap(makeEvent())).rejects.toMatchObject({ statusCode: 403 })
   })
 
   it('raises on an answer that is not a space list', async () => {
-    stubFetch({ body: { error: 'nope' } })
+    reply({ body: { error: 'nope' } })
     await expect(spaceAccessMap(makeEvent())).rejects.toMatchObject({ statusCode: 503 })
   })
 
   it('drops an entry carrying no slug or no known level', async () => {
-    stubFetch({
+    reply({
       body: {
         spaces: [
           { slug: '', name: 'Nameless', access: 'read' },
@@ -101,14 +81,14 @@ describe('spaceAccessMap', () => {
 
 describe('spaceAccessBySlug', () => {
   it('keys the map by slug', async () => {
-    stubFetch()
+    reply()
     const access = await spaceAccessBySlug(makeEvent())
     expect(access.get('team-wiki')?.access).toBe('manage')
     expect(access.get('general')?.access).toBe('read')
   })
 
   it('answers nothing rather than raising, so a control is hidden not broken', async () => {
-    stubFetch({ offline: true })
+    reply({ offline: true })
     expect(await spaceAccessBySlug(makeEvent())).toEqual(new Map())
   })
 })
