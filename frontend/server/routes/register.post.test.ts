@@ -25,10 +25,7 @@ vi.mock('../utils/collab-identity', () => ({
   forgetCollabToken: () => forgetCollabToken(),
 }))
 vi.mock('../utils/upstream', () => ({ fetchUpstream: (...a: unknown[]) => fetchUpstream(...a) }))
-vi.mock('h3', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('h3')>()
-  return { ...actual, readRawBody: (...a: unknown[]) => rawBody(...a) }
-})
+vi.mock('../utils/capped-body', () => ({ readCappedBody: (...a: unknown[]) => rawBody(...a) }))
 
 const BODY = '{"client_name":"Claude","redirect_uris":["https://claude.ai/cb"]}'
 
@@ -50,13 +47,14 @@ function event(ip = '203.0.113.9'): H3Event & { status?: number, headers: Record
   return e as unknown as H3Event & { status?: number, headers: Record<string, string> }
 }
 
-function upstream(status: number, body: unknown): Response {
-  return { status, json: async () => body } as unknown as Response
+function upstream(status: number, body: unknown, headers: Record<string, string> = {}): Response {
+  return { status, headers: new Headers(headers), json: async () => body } as unknown as Response
 }
 
 function upstreamHtml(status: number): Response {
   return {
     status,
+    headers: new Headers(),
     json: async () => { throw new SyntaxError('Unexpected token \'<\'') },
   } as unknown as Response
 }
@@ -68,7 +66,7 @@ function callRegister(e: H3Event) {
 describe('POST /register', () => {
   beforeEach(() => {
     fetchUpstream.mockReset()
-    rawBody.mockReset().mockResolvedValue(BODY)
+    rawBody.mockReset().mockResolvedValue(Buffer.from(BODY))
     forgetCollabToken.mockReset()
     configured.mockReset().mockReturnValue(true)
   })
@@ -89,12 +87,16 @@ describe('POST /register', () => {
     expect(e.node.res.statusCode).toBe(201)
   })
 
-  it('describes nothing about the registrant to Drupal', async () => {
+  it('tells Drupal the client address, nothing else about the registrant', async () => {
     fetchUpstream.mockResolvedValue(upstream(201, { client_id: 'abc' }))
     await callRegister(event('198.51.100.4'))
     const [, init] = fetchUpstream.mock.calls[0] as [string, RequestInit]
-    expect(Object.keys(init.headers as Record<string, string>).sort())
-      .toEqual(['Accept', 'Authorization', 'Content-Type'])
+    expect(init.headers).toEqual({
+      'Accept': 'application/json',
+      'Authorization': 'Bearer the-server-token',
+      'Content-Type': 'application/json',
+      'X-Forwarded-For': '198.51.100.4',
+    })
   })
 
   it.each([
@@ -106,6 +108,16 @@ describe('POST /register', () => {
     const e = event()
     await expect(callRegister(e)).resolves.toEqual(body)
     expect(e.node.res.statusCode).toBe(status)
+  })
+
+  it('relays Drupal\'s 429 with its Retry-After', async () => {
+    const body = { error: 'invalid_request', error_description: 'Too many registrations from this address.' }
+    fetchUpstream.mockResolvedValue(upstream(429, body, { 'Retry-After': '600' }))
+    const e = event()
+    await expect(callRegister(e)).resolves.toEqual(body)
+    expect(e.node.res.statusCode).toBe(429)
+    expect(e.headers['retry-after']).toBe('600')
+    expect(e.headers['access-control-expose-headers']).toBe('Retry-After')
   })
 
   it('issues a fresh token once when Drupal refuses the held one', async () => {

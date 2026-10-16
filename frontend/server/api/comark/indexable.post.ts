@@ -1,7 +1,8 @@
-import { defineEventHandler, readBody, createError } from 'h3'
+import { defineEventHandler, createError } from 'h3'
 import { markdownToIndexable } from '../../utils/comark-indexable'
 import { DEFAULT_CHUNK_OPTIONS, type ChunkOptions } from '../../utils/comark-chunks'
 import { bodyAllowedHtml } from '../../utils/comark-allowed-html'
+import { readCappedBody } from '../../utils/capped-body'
 
 /**
  * Called by Drupal's ComarkIndexable search_api processor at index time.
@@ -18,9 +19,21 @@ import { bodyAllowedHtml } from '../../utils/comark-allowed-html'
  * No auth, no JSON:API — Drupal already has the markdown and passes it in
  * the request body. The Nuxt sidecar runs in the same docker container
  * (pm2 on web:3000), so the call is intra-container.
+ *
+ * The route is reachable from outside, so a body over {@link MAX_BODY_BYTES}
+ * is a 413. The cap leaves room for `data:` images in a page.
  */
+export const MAX_BODY_BYTES = 8 * 1024 * 1024
+
 export default defineEventHandler(async (event) => {
-  const body = await readBody<{ markdown?: string, chunkOptions?: Partial<ChunkOptions> }>(event)
+  const raw = await readCappedBody(event, MAX_BODY_BYTES)
+  let body: { markdown?: string, chunkOptions?: Partial<ChunkOptions> } | undefined
+  try {
+    body = raw.byteLength > 0 ? JSON.parse(raw.toString('utf8')) : undefined
+  }
+  catch {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid JSON body' })
+  }
   if (typeof body?.markdown !== 'string') {
     throw createError({ statusCode: 400, statusMessage: 'Missing markdown' })
   }

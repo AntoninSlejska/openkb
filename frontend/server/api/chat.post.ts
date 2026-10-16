@@ -1,8 +1,9 @@
-import { createError, defineEventHandler, readBody, sendStream, setHeader } from 'h3'
+import { createError, defineEventHandler, sendStream, setHeader } from 'h3'
 import { useRuntimeConfig } from '#imports'
 import { drupalBaseUrl } from '../utils/drupal'
 import { forwardedAuthHeaders } from '../utils/actor'
 import { fetchUpstream, upstreamError, UPSTREAM_UNAVAILABLE } from '../utils/upstream'
+import { readCappedBody } from '../utils/capped-body'
 
 // Proxy the AI-SDK UI-message stream through Drupal's vercel_ai_sdk module.
 // The Drupal endpoint is the source of truth — no Nuxt-side mock fallback.
@@ -15,8 +16,11 @@ import { fetchUpstream, upstreamError, UPSTREAM_UNAVAILABLE } from '../utils/ups
 // upstream call (server/utils/upstream.ts): a 400 for a turn the bridge
 // refused stays a 400, which the drawer words apart from an outage.
 
+/** Room for a long chat history; Drupal's input length guardrail sets the real limit. */
+export const MAX_BODY_BYTES = 64 * 1024
+
 export default defineEventHandler(async (event) => {
-  const body = (await readBody(event).catch(() => ({}))) as Record<string, unknown>
+  const body = parseObject(await readCappedBody(event, MAX_BODY_BYTES))
 
   const agentId
     = (typeof body.agentId === 'string' && body.agentId !== '' ? body.agentId : null)
@@ -57,3 +61,13 @@ export default defineEventHandler(async (event) => {
 
   return sendStream(event, res.body)
 })
+
+function parseObject(raw: Buffer): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw.toString('utf8'))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  }
+  catch {
+    return {}
+  }
+}

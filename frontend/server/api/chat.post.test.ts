@@ -4,14 +4,11 @@ import type { H3Event } from 'h3'
 /** The chat proxy maps upstream failures like every other proxy and never names the upstream. */
 
 const UPSTREAM = 'http://drupal.internal:8080'
-const readBody = vi.fn()
+const rawBody = vi.fn()
 
 vi.mock('#imports', () => ({ useRuntimeConfig: () => ({ public: {} }) }))
 vi.mock('../utils/drupal', () => ({ drupalBaseUrl: () => UPSTREAM }))
-vi.mock('h3', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('h3')>()
-  return { ...actual, readBody: (...a: unknown[]) => readBody(...a) }
-})
+vi.mock('../utils/capped-body', () => ({ readCappedBody: (...a: unknown[]) => rawBody(...a) }))
 
 const handler = (await import('./chat.post')).default as unknown as
   (event: H3Event) => Promise<unknown>
@@ -19,7 +16,7 @@ const handler = (await import('./chat.post')).default as unknown as
 const event = { node: { req: { headers: { 'cookie': 'SESS=1', 'x-csrf-token': 'browser-token' } } } } as unknown as H3Event
 
 beforeEach(() => {
-  readBody.mockResolvedValue({ messages: [] })
+  rawBody.mockResolvedValue(Buffer.from('{"messages":[]}'))
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 

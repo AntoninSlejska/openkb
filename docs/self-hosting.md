@@ -45,7 +45,7 @@ Both ways end in a cache rebuild, and that is what lifts the hold.
 
 If your site imports its own `config/sync` after `updatedb`, export the config again right after `updatedb` and before the import: updates add config (such as the prompt safety guardrail sets, `docs/ai-chat.md`) that an older export would delete.
 
-Both services listen on plain HTTP, bound to `127.0.0.1`: `drupal` on `DRUPAL_HTTP_PORT` (8080), `frontend` on `FRONTEND_HTTP_PORT` (3000). `DRUPAL_LISTEN_IP` / `FRONTEND_LISTEN_IP` open them to other hosts; then narrow `REVERSE_PROXY_ADDRESSES` to the proxy's address, or any host that reaches the port sets the client IP and the scheme Drupal sees. Open the frontend port to the proxy only: the frontend passes on the `X-Forwarded-For` it receives, so a client reaching it directly sets the address Drupal's login flood keys on.
+Both services listen on plain HTTP, bound to `127.0.0.1`: `drupal` on `DRUPAL_HTTP_PORT` (8080), `frontend` on `FRONTEND_HTTP_PORT` (3000). `DRUPAL_LISTEN_IP` / `FRONTEND_LISTEN_IP` open them to other hosts; then narrow `REVERSE_PROXY_ADDRESSES` to the proxy's address, or any host that reaches the port sets the client IP and the scheme Drupal sees. Keep the frontend's address in it too: the frontend relays agent registrations with the client IP, and Drupal limits them per client IP — without it, all clients share one limit. Open the frontend port to the proxy only: the frontend passes on the `X-Forwarded-For` it receives, so a client reaching it directly sets the address Drupal's login and registration floods key on.
 
 ## Outgoing mail
 

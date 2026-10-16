@@ -1,6 +1,8 @@
-import { defineEventHandler, readRawBody, setResponseHeader, setResponseStatus } from 'h3'
+import { defineEventHandler, setResponseHeader, setResponseStatus } from 'h3'
 import { drupalBaseUrl } from '../utils/drupal'
 import { fetchUpstream } from '../utils/upstream'
+import { readCappedBody } from '../utils/capped-body'
+import { forwardedFor } from '../utils/forwarded-for'
 import { collabAuthHeaders, collabIdentityConfigured, forgetCollabToken } from '../utils/collab-identity'
 
 /**
@@ -15,9 +17,14 @@ import { collabAuthHeaders, collabIdentityConfigured, forgetCollabToken } from '
  *
  * One thing is added on the way through: this server's own Bearer token (ADR
  * 0001). Registration is anonymous by protocol, so the bridge cannot
- * authenticate the registrant and authenticates the relay instead.
+ * authenticate the registrant and authenticates the relay instead. The
+ * client's address goes along as X-Forwarded-For, so Drupal limits
+ * registrations per client.
  */
 const BRIDGE_PATH = '/openkb/agent/register'
+
+/** Five redirect URIs of 2048 characters, the most Drupal accepts, fit with room to spare. */
+export const MAX_BODY_BYTES = 64 * 1024
 
 export default defineEventHandler(async (event) => {
   if (!collabIdentityConfigured()) {
@@ -28,12 +35,13 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  const body = (await readRawBody(event, 'utf8')) ?? ''
+  const body = (await readCappedBody(event, MAX_BODY_BYTES)).toString('utf8')
   const relay = async (): Promise<Response> => fetchUpstream(`${drupalBaseUrl()}${BRIDGE_PATH}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
+      ...forwardedFor(event),
       ...(await collabAuthHeaders()),
     },
     body,
@@ -49,6 +57,12 @@ export default defineEventHandler(async (event) => {
 
   setResponseStatus(event, res.status)
   setResponseHeader(event, 'access-control-allow-origin', '*')
+  const retryAfter = res.headers.get('retry-after')
+  if (retryAfter) {
+    setResponseHeader(event, 'retry-after', retryAfter)
+    // Not CORS-safelisted: browser MCP clients read it only when exposed.
+    setResponseHeader(event, 'access-control-expose-headers', 'Retry-After')
+  }
   try {
     return await res.json()
   }
