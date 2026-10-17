@@ -47,6 +47,12 @@ x-drupal-environment:
     OPENKB_RECIPES_DIR: ${OPENKB_RECIPES_DIR:-/app/recipes}
     # Optional. Without it the chat and the chunk index stay unusable.
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    OPENKB_AI_PROVIDER: ${OPENKB_AI_PROVIDER:-}
+    OLLAMA_HOST: ${OLLAMA_HOST:-}
+    OLLAMA_PORT: ${OLLAMA_PORT:-}
+    OLLAMA_CHAT_MODEL: ${OLLAMA_CHAT_MODEL:-}
+    OLLAMA_EMBED_MODEL: ${OLLAMA_EMBED_MODEL:-}
     # Optional. Without MAILER_DSN no mail leaves the site; MAIL_FROM is the
     # sender address.
     MAILER_DSN: ${MAILER_DSN:-}

@@ -33,11 +33,13 @@
         "drupal/ai_provider_amazeeio": "^1.3.1",
         "drupal/ai_provider_anthropic": "^1.2.2",
         "drupal/ai_provider_mistral": "^1.1.0-rc1@RC",
+        "drupal/ai_provider_ollama": "^1.2.0-rc3",
         "drupal/ai_provider_openai": "^1.2.5",
         "drupal/ai_recipe_guardrails_prompt_safety": "^1.0",
         "drupal/core-composer-scaffold": "^11.1",
         "drupal/core-project-message": "^11.1",
         "drupal/core-recommended": "11.4.*",
+        "drupal/gemini_provider": "^1.1",
         "drupal/lupus_decoupled_recipe": "^2.0",
         "drupal/monitoring": "^1.20.0",
         "drupal/ohdear_integration": "^3.0.0",
@@ -92,9 +94,15 @@
             }
         },
         "patches": {
+            "drupal/gemini_provider": {
+                "Fix type mismatch in buildSchema for minLength/maxLength and uninitialized properties": "patches/gemini-provider-tools-schema-types.patch"
+            },
             "drupal/monitoring": {
                 "OKB-156: Compare a requirement's severity as an int — Drupal 11.2 turned it into a RequirementSeverity enum, so the strict int comparison in the requirements_recap sensor matches nothing and the sensor reports zero errors on a site whose status report is full of them. CoreRequirementsSensorPlugin already handles both forms. drupal.org issue pending; swap for its patch once filed.": "patches/monitoring-requirements-recap-severity-enum.patch",
                 "OKB-156: Declare the requirements_recap sensor's settings schema. The plugin reads `severity` and `disabled_requirements`, but the module ships no monitoring.settings.requirements_recap type, so every install of a sensor using it logs a `settings missing schema` warning. drupal.org issue pending; swap for its patch once filed.": "patches/monitoring-requirements-recap-settings-schema.patch"
+            },
+            "drupal/ai_provider_ollama": {
+                "Support embeddingsCollection and fix empty state fallback in getModel": "patches/ai-provider-ollama-embeddings-collection.patch"
             }
         },
         "installer-paths": {

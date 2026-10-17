@@ -33,6 +33,7 @@ install:
   - field_ui
   - file
   - filter
+  - gemini_provider
   - help
   - image
   - inline_comment
@@ -140,6 +141,9 @@ config:
         api_key: openai_env
         moderation: true
         host: ''
+    gemini_provider.settings:
+      simpleConfigUpdate:
+        api_key: gemini_env
     jsonapi.settings:
       simpleConfigUpdate:
         read_only: false

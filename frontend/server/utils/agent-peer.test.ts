@@ -449,18 +449,47 @@ describe('readBlockOpList', () => {
     expect(readBlockOpList(ops)).toEqual({ ops })
   })
 
-  it('refuses an expect on an anchorless op rather than ignoring it', () => {
-    // The op names no block, so there is no version to compare — accepting the
-    // field would report a CAS the write never ran.
+  it('recovers block ID passed in expect as id when unanchored', () => {
+    expect(readBlockOpList([{ markdown: 'one', expect: 'b-f0184038' }])).toEqual({
+      ops: [{ id: 'b-f0184038', markdown: 'one' }],
+    })
+
+    // If block ID is passed as expect alongside id, it is stripped
+    expect(readBlockOpList([{ id: 'b-f0184038', markdown: 'one', expect: 'b-f0184038' }])).toEqual({
+      ops: [{ id: 'b-f0184038', markdown: 'one' }],
+    })
+  })
+
+  it('drops expect on an anchorless op rather than failing', () => {
     expect(readBlockOpList([
       { after: 'b-1', markdown: 'one' },
       { markdown: 'two', expect: 'deadbeef0000' },
     ])).toEqual({
-      fault: 'blocks[1] chains after blocks[0], so it names no block to expect a version for.',
+      ops: [
+        { after: 'b-1', markdown: 'one' },
+        { markdown: 'two' },
+      ],
     })
 
     expect(readBlockOpList([{ markdown: 'one', expect: 'deadbeef0000' }])).toEqual({
-      fault: 'blocks[0] names no block to expect a version for.',
+      ops: [{ markdown: 'one' }],
+    })
+  })
+
+  it('treats null or empty expect as absent', () => {
+    const opsWithNull = [{ id: 'b-1', markdown: 'one', expect: null }]
+    expect(readBlockOpList(opsWithNull)).toEqual({
+      ops: [{ id: 'b-1', markdown: 'one' }],
+    })
+
+    const opsWithEmpty = [{ id: 'b-1', markdown: 'one', expect: '' }]
+    expect(readBlockOpList(opsWithEmpty)).toEqual({
+      ops: [{ id: 'b-1', markdown: 'one' }],
+    })
+
+    const anchorlessNull = [{ markdown: 'orphan', expect: null }]
+    expect(readBlockOpList(anchorlessNull)).toEqual({
+      ops: [{ markdown: 'orphan' }],
     })
   })
 

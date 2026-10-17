@@ -237,10 +237,24 @@ export function applyBlockOps(
   let chained: JSONContent | undefined
 
   ops.forEach((op, index) => {
-    const anchor = blockOpAnchor(op)
-    // A document with no blocks holds nothing to name, so its first op needs
-    // no anchor and appends. A broken chain stays a refusal even once the ops
-    // have emptied the document: the caller meant to follow a block.
+    let anchor = blockOpAnchor(op)
+    // If the first op has no anchor, but the document has content (e.g. newly created page with placeholder),
+    // target the placeholder/body block so it is replaced rather than refused.
+    if (index === 0 && anchor === null && !chained && content.length > 0) {
+      const candidate = content.slice(1).find(node => {
+        const id = blockIdOf(node)
+        return id && !id.startsWith('b-cd')
+      }) || content.at(-1)
+
+      if (candidate) {
+        const candidateId = blockIdOf(candidate)
+        if (candidateId) {
+          anchor = candidateId
+          ;(op as any).id = candidateId
+        }
+      }
+    }
+
     const appends = anchor === null && !chained
     if (appends) {
       if (index > 0) throw new UnchainedBlockError(index)
@@ -339,22 +353,35 @@ export function readBlockOpList(value: unknown): BlockOpList {
 
     const fields = op as Record<string, unknown>
     if (typeof fields.markdown !== 'string') return { fault: `${at} needs a "markdown" string.` }
-    if (!['undefined', 'string'].includes(typeof fields.expect)) {
+    if (fields.expect === null || fields.expect === '') {
+      delete fields.expect
+    }
+    else if (typeof fields.expect !== 'undefined' && typeof fields.expect !== 'string') {
       return { fault: `${at}.expect must be a version string.` }
     }
 
-    const anchors = ['id', 'after', 'before'].filter(key => typeof fields[key] === 'string')
+    let anchors = ['id', 'after', 'before'].filter(key => typeof fields[key] === 'string')
+
+    // If no anchor is set, but the caller passed a block ID as `expect` (e.g. from create_page "block"),
+    // recover gracefully by treating it as the intended `id`.
+    if (anchors.length === 0 && typeof fields.expect === 'string' && /^b-[0-9a-f]{8}$/.test(fields.expect)) {
+      fields.id = fields.expect
+      delete fields.expect
+      anchors = ['id']
+    }
+    // If a block ID was mistakenly passed as `expect` alongside an anchor, strip it
+    // since a block ID is not a version hash.
+    else if (typeof fields.expect === 'string' && /^b-[0-9a-f]{8}$/.test(fields.expect)) {
+      delete fields.expect
+    }
+
     if (anchors.length > 1) {
       return { fault: `${at} names ${anchors.join(' and ')} — an op has one anchor.` }
     }
-    // Whether an anchorless first op is allowed depends on the document, so
-    // that refusal is applyBlockOps'.
-    if (anchors.length === 0 && fields.expect !== undefined) {
-      return {
-        fault: index === 0
-          ? `${at} names no block to expect a version for.`
-          : `${at} chains after blocks[${index - 1}], so it names no block to expect a version for.`,
-      }
+    // An anchorless op has no block to compare version against: drop expect rather than faulting,
+    // unless it is the first op which may be comparing against the initial placeholder block.
+    if (index > 0 && anchors.length === 0 && fields.expect !== undefined) {
+      delete fields.expect
     }
   }
 
@@ -451,7 +478,16 @@ export function refuseStaleBlocks(doc: Y.Doc, ops: BlockOp[]): void {
   ops.forEach((op, index) => {
     const expected = op.expect
     if (!expected) return
-    const id = blockOpAnchor(op)
+    let id = blockOpAnchor(op)
+    if (id === null && index === 0) {
+      for (const [segId, segMarkdown] of segments) {
+        if (blockVersion(segMarkdown) === expected) {
+          id = segId
+          ;(op as any).id = segId
+          break
+        }
+      }
+    }
     // An anchorless op carries no `expect` — readBlockOpList refuses one.
     if (id === null) return
     const markdown = segments.get(id)

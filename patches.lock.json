@@ -1,0 +1,257 @@
+{
+    "_hash": "7ce8addc681d9a3349c5361602db798ca06516a4e4705a9ada3527abc898c16c",
+    "patches": {
+        "drupal/gemini_provider": [
+            {
+                "package": "drupal/gemini_provider",
+                "description": "Fix type mismatch in buildSchema for minLength/maxLength and uninitialized properties",
+                "url": "patches/gemini-provider-tools-schema-types.patch",
+                "sha256": "83550bb421a633e0ad3c6c94020c971c8b4f1f265fef9fb37bec7dcadb437980",
+                "depth": 1,
+                "extra": {
+                    "provenance": "root"
+                }
+            }
+        ],
+        "drupal/monitoring": [
+            {
+                "package": "drupal/monitoring",
+                "description": "OKB-156: Compare a requirement's severity as an int — Drupal 11.2 turned it into a RequirementSeverity enum, so the strict int comparison in the requirements_recap sensor matches nothing and the sensor reports zero errors on a site whose status report is full of them. CoreRequirementsSensorPlugin already handles both forms. drupal.org issue pending; swap for its patch once filed.",
+                "url": "patches/monitoring-requirements-recap-severity-enum.patch",
+                "sha256": "ae4d75bc53cd7810f5811a0a3e5881acc097644d489acfa0bac347e10580f735",
+                "depth": 1,
+                "extra": {
+                    "provenance": "root"
+                }
+            },
+            {
+                "package": "drupal/monitoring",
+                "description": "OKB-156: Declare the requirements_recap sensor's settings schema. The plugin reads `severity` and `disabled_requirements`, but the module ships no monitoring.settings.requirements_recap type, so every install of a sensor using it logs a `settings missing schema` warning. drupal.org issue pending; swap for its patch once filed.",
+                "url": "patches/monitoring-requirements-recap-settings-schema.patch",
+                "sha256": "bb734465b6f43c33c8bc110d729cf502a0c9a76d32f3d1c36ff706d7c9821cdd",
+                "depth": 1,
+                "extra": {
+                    "provenance": "root"
+                }
+            }
+        ],
+        "drupal/ai": [
+            {
+                "package": "drupal/ai",
+                "description": "OKB-309: Embed nothing for a lexical_only query. The ai_search backend embeds the query's keys before every search and only reaches a provider's vectorSearch() when it holds a vector, so a search that wants the lexical arm alone still costs an embeddings call. The option is passed through instead, and the provider answers it off the index's own text fields. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_search-lexical-only-skips-the-embedding.patch",
+                "sha256": "35a89fc616a19cdf6472b574e23efe9e6a51926bb249383db138e52714e6274f",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai"
+                }
+            }
+        ],
+        "drupal/ai_vdb_provider_opensearch": [
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-295: Map every stored field as a keyword. createCollection() declares only the vector, so the item keys and the strategy's attributes are dynamically mapped as analyzed text — no `term` filter matches one, which also leaves deleteItems() matching nothing and duplicating every chunk on reindex. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-attributes-mapped-as-keywords.patch",
+                "sha256": "8d28f389fb12d36004484e924597bde2ec785a636a1047cdc2fab4969f1a1bd8",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            },
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-295: Store a row under its own id, scoped by index, and delete it by the same scope, surviving a concurrent save. insertIntoCollection() mints a uniqid() for every row, so nothing a reindex writes can replace what is there; the collection belongs to the server, so the index has to be part of the id. deleteItems() then removes by drupal_entity_id alone, which takes a second index's rows for the same entity with it, and runs delete_by_query without `conflicts` or `refresh`, so a row whose version moved while another save was indexing the same page fails the whole request — a 500 on the save — and the rows it did delete are invisible to the next one. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-chunk-id-as-document-id.patch",
+                "sha256": "bbce299c92a4e1bf59fbd649fe575a733acd6c69afc2f00c0a9e70ce24065b5f",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            },
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-295: Answer one bool filter list from prepareFilters(). It writes the index id into the clause the condition group built, which puts either two fields in one `term` or a `term` beside a `bool`; OpenSearch rejects both, so any query carrying a condition fails. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-one-bool-filter-list.patch",
+                "sha256": "8dcf1cabf215ca48503a6e78fe93575a3588058f3f3e7693801fc088157a1bb3",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            },
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-295: List only the provider's own collections. getCollections() answers every index in the cluster, under its prefixed name, so foreign indices are offered as collections and the names it returns cannot be passed back to createCollection() or dropCollection(). An index made before the marker is recognised by its vector field. Applies on top of the keyword-mapping patch, whose comment is in its context. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-own-collections-only.patch",
+                "sha256": "35c1180c5aba9e96c23226380ae1895878eadd412d327b036bb5cd4a5e918159",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            },
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-295: Answer the stored row on the read path. vectorSearch() narrows `_source` to the output_fields ai_search asks for — id, drupal_entity_id, drupal_long_id, content — so every attribute the embedding strategy stored is dropped before the result item is built and a consumer can neither render nor cite one. Applies on top of the collections patch. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-stored-row-on-the-read-path.patch",
+                "sha256": "dc1520e82855ee668f2809180debd4e98bd17a450ab80756868124acc6bc74b7",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            },
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-306: Search a collection on both arms at once. vectorSearch() only ever issues a kNN clause, so a term a section spells out is unreachable unless the embedding places it near. Where a site declares an analyzed text field on the new CollectionMappingEvent, one hybrid query runs a match clause beside the kNN one, a search pipeline fuses the scores, a vector_min_score option floors the kNN arm, and highlight fragments come back on the row, marked with private-use characters no stored text carries. The match clause mirrors the parsed keys' conjunction, and an excluded key goes into the filter both arms share rather than into a clause of either. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-hybrid-knn-and-match.patch",
+                "sha256": "dd1e56057a4e7aed447f2ce72de53b2d15bc09c9c4ab6926cf1a9388d581a2d0",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            },
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-309: Run the match clause on its own where a query asks for it. vectorSearch() always issues a kNN clause, so a caller that wants the lexical arm alone — a title prefix offered while someone types, where an embedding costs a provider call and a fragment embeds to noise — has no way to ask for it. A `lexical_only` query option answers off the analyzed text fields the CollectionMappingEvent declares, with no kNN clause and no search pipeline, and its value names the OpenSearch match type (`bool_prefix` for a prefix match). Applies on top of the hybrid patch. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-lexical-only-query.patch",
+                "sha256": "eb9cdcf50fc1926f20433703424c1677b1105d9aea29aee131f317d71a026fb5",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            },
+            {
+                "package": "drupal/ai_vdb_provider_opensearch",
+                "description": "OKB-311: List a collection through the lexical-only path. A `lexical_only` query with the `match_all` match type matches no keys at all, so a caller with nothing to rank by — an agent asking for the newest pages of a space — reads the rows the filters leave without embedding a query, `vectorSearch()` passes that arm's own sorts down as the OpenSearch `sort` so the order is the caller's, and a `collapse` key names the attribute the listing answers one row per, so its `size` counts groups. Applies on top of the lexical-only patch. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/ai_vdb_provider_opensearch-listing-query.patch",
+                "sha256": "94883ffdadc937a572df2fdf63518147d55bb02c9e8d6c32e3599a25c2ffb037",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/ai_vdb_provider_opensearch"
+                }
+            }
+        ],
+        "drupal/core": [
+            {
+                "package": "drupal/core",
+                "description": "#3210926: Call to a member function getAlias on null in PathItem->postSave(). Saving a pending revision whose path field carries a pid for an alias entity that is gone fatals; the guard re-creates the alias instead. Paths are relative to the drupal repository root; composer-patches knows drupal/core takes patch depth 2.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/drupal-core-3210926-pathitem-postsave-missing-alias.patch",
+                "sha256": "97b77bbbf638b887663934381ebb343d97a7604701ae11d93f5476ea3f23bb3d",
+                "depth": 2,
+                "extra": {
+                    "provenance": "dependency:drupal/core"
+                }
+            }
+        ],
+        "drupal/custom_elements": [
+            {
+                "package": "drupal/custom_elements",
+                "description": "OKB-134: Let the entity_reference formatter emit the referenced entity UUID (upstream merge pending)",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/custom_elements-entity-reference-include-uuid.patch",
+                "sha256": "2e765599fe75d9bfb5e0ad1c64c338603bbbbf2aa3326321c8108013719d20cd",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/custom_elements"
+                }
+            },
+            {
+                "package": "drupal/custom_elements",
+                "description": "OKB-338: Build the library elements from the asset resolver — one call gives the files in Drupal's load order across libraries and the drupalSettings the libraries run on; the generator's own walk ordered files per library only and never minted the settings core's ajax.js and Drupal.url() read. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/custom_elements-library-elements-from-asset-resolver.patch",
+                "sha256": "fbb82dee84a1c8da258834e941e5d575205e95a48b712f130d5851c68a5a7efb",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/custom_elements"
+                }
+            }
+        ],
+        "drupal/lupus_ce_renderer": [
+            {
+                "package": "drupal/lupus_ce_renderer",
+                "description": "OKB-151: Answer a plain 3xx Response as the CE redirect payload too — a controller answering in PSR-7 (simple_oauth's /oauth/authorize) reaches the response event as a plain Response, so the class check alone lets a raw 302 leave /ce-api for a consumer's HTTP layer to follow server-side. drupal.org issue pending; swap for its patch once merged.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/lupus_ce_renderer-psr7-redirect-as-ce-payload.patch",
+                "sha256": "d99f19055980e3c169180c59028ed1df967421bc6867c7a0ac560e346c8e2f43",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/lupus_ce_renderer"
+                }
+            },
+            {
+                "package": "drupal/lupus_ce_renderer",
+                "description": "OKB-270: Keep a CE redirect to the destination query parameter relative. Core resolves the destination against the backend host, so a form submitted from the frontend with ?destination= sends the reader to the backend. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/lupus_ce_renderer-destination-relative.patch",
+                "sha256": "05371ae45db3d411a13e1cdccffb8de6f8674774e60a83a8d8d117864743e7f1",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/lupus_ce_renderer"
+                }
+            }
+        ],
+        "drupal/lupus_decoupled": [
+            {
+                "package": "drupal/lupus_decoupled",
+                "description": "#3466974: Answer configured permissions for the current user in /api/site-info, so a frontend can ask whether it may offer an action instead of rendering a page to read roles off it. Varies by the user.permissions cache context; anonymous stays one shared entry. Pending upstream, swap for its patch once merged.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/lupus_decoupled-3466974-site-info-permissions.patch",
+                "sha256": "b6ed19b8fd3d95ec0c127b1b7ed2e4acc03931c43731a062c8c2e8f002dcfedc",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/lupus_decoupled"
+                }
+            },
+            {
+                "package": "drupal/lupus_decoupled",
+                "description": "OKB-270: Show a login flood block as a form error on custom elements requests. Core answers it with a bare 403 HTML page, which a frontend cannot show, so the reader never learns the account or IP is blocked. drupal.org issue pending; swap for its patch once filed.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/lupus_decoupled-user-form-flood-error.patch",
+                "sha256": "addf26d7170c4ee1be8b840c5cfef8fb136974f112eb1737ec949bc5124a6ece",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/lupus_decoupled"
+                }
+            }
+        ],
+        "drupal/mcp_server": [
+            {
+                "package": "drupal/mcp_server",
+                "description": "#3585917, OKB-241: The SDK reads every suspension of a request handler's fiber as a payload addressed to the client, but fibers are process-wide and Drupal suspends the running one for its own scheduling, so a tools/call or completion/complete that loads an entity is answered as text/event-stream instead of application/json. src/ part of MR !69, against 2.0.0-beta5; drop once the fix is released upstream.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/mcp_server-fiber-shield.patch",
+                "sha256": "edfb5c869825b4b0d2fdef6c0626e4d0131575eb81ae767f3aefb4a645bf8e7f",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/mcp_server"
+                }
+            }
+        ],
+        "drupal/mcp_server_tool_bridge": [
+            {
+                "package": "drupal/mcp_server_tool_bridge",
+                "description": "OKB-201: Invalidate the tool plugin cache when an mcp_tool_config is saved or deleted. The entity invalidates mcp_server:discovery, but mcp_server's tool plugin manager caches the derived definitions under mcp_server:tools — so switching a tool on or off has no effect until the plugin caches are cleared by hand. drupal.org issue pending.",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/mcp_server_tool_bridge-invalidate-the-tool-plugin-cache.patch",
+                "sha256": "38532c3d390e74c8846ab0dc7b6c9ccb0fa6ad12cb5a22dc7b44631bf9b0ec54",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/mcp_server_tool_bridge"
+                }
+            }
+        ],
+        "drupal/simple_oauth": [
+            {
+                "package": "drupal/simple_oauth",
+                "description": "OKB-73: Vary calculated permissions by the token subject's roles (drupal.org issue pending)",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/simple_oauth-token-subject-roles-cache-context.patch",
+                "sha256": "aa9a56ffa65b287011cde953c82157002721789d4d647e261d4e0b37c7df762f",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/simple_oauth"
+                }
+            },
+            {
+                "package": "drupal/simple_oauth",
+                "description": "OKB-75: Apply the scope intersect to the token subject computed under an ambient token (drupal.org issue pending)",
+                "url": "https://git.drupalcode.org/project/openkb/-/raw/1.x/patches/simple_oauth-scope-ceiling-ambient-subject.patch",
+                "sha256": "386ce5ba375e80e412d4c2305675d00df2b90130f0e7cfcbbf72b21542469aef",
+                "depth": 1,
+                "extra": {
+                    "provenance": "dependency:drupal/simple_oauth"
+                }
+            }
+        ]
+    }
+}

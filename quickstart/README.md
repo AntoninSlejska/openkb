@@ -56,12 +56,13 @@ docker compose exec drupal drush cron           # run cron now
 
 ## Turning on the AI chat
 
-The site reads the OpenAI key from the container's environment — nothing is
-pasted into Drupal, and no provider has to be picked: chat and embeddings
-already default to OpenAI.
+The site reads the OpenAI or Gemini key from the container's environment — nothing is
+pasted into Drupal.
 
 ```sh
 OPENAI_API_KEY=sk-...       # in .env
+# or
+GEMINI_API_KEY=AIza...      # in .env
 docker compose up -d        # re-creates the containers that read it
 ```
 

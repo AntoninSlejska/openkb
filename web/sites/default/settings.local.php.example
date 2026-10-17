@@ -11,5 +11,6 @@
  * Examples:
  * - $settings['hash_salt'] = '...';
  * - $config['ai_provider_openai.settings']['api_key'] = '...';
+ * - $config['gemini_provider.settings']['api_key'] = '...';
  * - $databases['default']['default']['host'] = '127.0.0.1';
  */

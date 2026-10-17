@@ -200,13 +200,30 @@ if $DRUSH search-api:list 2>/dev/null | grep -q kb_chunks; then
       ;;
   esac
 
+  # If GEMINI_API_KEY is provided and OPENAI_API_KEY is unset, switch the default
+  # AI provider and embeddings engine to Gemini.
+  if [ -n "${GEMINI_API_KEY:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+    echo "GEMINI_API_KEY detected without OPENAI_API_KEY: switching default AI provider to Gemini..."
+    $DRUSH config:set ai.settings default_providers.chat.provider_id gemini -y
+    $DRUSH config:set ai.settings default_providers.chat.model_id models/gemini-3.8-flash -y
+    $DRUSH config:set ai.settings default_providers.embeddings.provider_id gemini -y
+    $DRUSH config:set ai.settings default_providers.embeddings.model_id models/gemini-embedding-001 -y
+    $DRUSH config:set search_api.server.ai_chunks backend_config.embeddings_engine gemini__models/gemini-embedding-001 -y
+    $DRUSH config:set search_api.server.ai_chunks backend_config.embeddings_engine_configuration.dimensions 3072 -y
+  fi
+
   # An item the engine cannot embed stays queued, and the indexing batch keeps
   # retrying the queue: without a key the re-feed would never end and the
   # install would never finish. A keyless site is a supported install, so it
   # leaves the chunk index for cron and for the operator who adds the key.
   keyed=$($DRUSH php:eval '
     $engine = \Drupal\search_api\Entity\Server::load("ai_chunks")?->getBackendConfig()["embeddings_engine"] ?? "";
-    $key_id = \Drupal::config("ai_provider_" . explode("__", $engine)[0] . ".settings")->get("api_key");
+    $provider = explode("__", $engine)[0];
+    $config = \Drupal::config("ai_provider_{$provider}.settings");
+    if ($config->isNew()) {
+      $config = \Drupal::config("{$provider}_provider.settings");
+    }
+    $key_id = $config->get("api_key");
     print $key_id && !\Drupal::service("key.repository")->getKey($key_id)?->getKeyValue() ? "no-key" : "has-key";
   ' 2>/dev/null) || true
   case "$keyed" in

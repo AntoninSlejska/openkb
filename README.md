@@ -40,7 +40,7 @@ The `drupal` container installs the site on its first boot — a few minutes, wi
 
 **Browsers**: current Chrome, Edge, Firefox and Safari. The frontend is built with Tailwind CSS 4, whose floor is Safari 16.4, Chrome 111 and Firefox 128 ([compatibility](https://tailwindcss.com/docs/compatibility)).
 
-**AI features**: an API key of a supported provider, OpenAI by default; see [AI setup](#ai-setup). Everything else runs without one.
+**AI features**: an API key of a supported provider, OpenAI or Gemini by default; see [AI setup](#ai-setup). Everything else runs without one.
 
 ## Installation
 
@@ -75,14 +75,17 @@ The rest is as in [Try it in five minutes](#try-it-in-five-minutes). [`docs/self
 | Provider | In the image | To use it |
 |---|---|---|
 | [OpenAI](https://www.drupal.org/project/ai_provider_openai) | enabled, the default for chat and embeddings (`text-embedding-3-small`) | set `OPENAI_API_KEY` in `.env`, nothing to configure |
+| [Gemini](https://www.drupal.org/project/gemini_provider) | enabled, supported for chat and embeddings (`gemini-embedding-001`) | set `GEMINI_API_KEY` in `.env`, nothing to configure |
 | [amazee.ai](https://www.drupal.org/project/ai_provider_amazeeio) | enabled | paste the key at `/admin/config/system/keys`, pick it at `/admin/config/ai/providers/amazeeio`, then select the provider in the defaults |
 
 Any provider of the Drupal AI framework can be added; the [provider list](https://www.drupal.org/project/ai) has them. Docs for more providers follow.
 
-**The key.** With OpenAI, the key is read from the container's environment and never stored in the site:
+**The key.** With OpenAI or Gemini, the key is read from the container's environment and never stored in the site:
 
 ```sh
 OPENAI_API_KEY=sk-...             # in .env
+# or
+GEMINI_API_KEY=AIza...            # in .env
 docker compose up -d              # re-creates the containers that read it
 ```
 

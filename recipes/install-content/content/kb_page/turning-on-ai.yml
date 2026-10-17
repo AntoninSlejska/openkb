@@ -74,7 +74,7 @@ default:
         ## Steps {#b-10c8c6ba}
 
         ::block{#b-67ca7fed}
-        1. Put the key in the site's environment: `OPENAI_API_KEY` in the `.env` file next to the compose file. Restart the `drupal` service. The key is read from the environment and is never stored in the database.
+        1. Put the key in the site's environment: `OPENAI_API_KEY` or `GEMINI_API_KEY` in the `.env` file next to the compose file. Restart the `drupal` service. The key is read from the environment and is never stored in the database.
         2. Check that the provider answers: open `/admin/config/ai/explorers` on the administration host and run a test.
         3. Re-feed the search index so every page is embedded. The commands are in [AI setup](https://github.com/openkb-app/openkb/blob/1.x/README.md#ai-setup).
         4. Open the site and ask a question with "Ask OpenKnowledgebase".

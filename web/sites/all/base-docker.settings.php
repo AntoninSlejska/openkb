@@ -7,6 +7,9 @@
  * Loaded when PHAPP_ENV_TYPE=docker, which is also the default.
  */
 
+ini_set('max_execution_time', '300');
+set_time_limit(300);
+
 $databases['default']['default'] = [
   'driver' => 'mysql',
   'database' => getenv('MARIADB_DATABASE') ?: 'drupal',
@@ -59,3 +62,42 @@ if ($mailer_dsn = getenv('MAILER_DSN')) {
 if ($mail_from = getenv('MAIL_FROM')) {
   $config['system.site']['mail'] = $mail_from;
 }
+
+// If OLLAMA_HOST or OPENKB_AI_PROVIDER=ollama is provided, default the chat
+// provider and embeddings to local Ollama.
+if (getenv('OPENKB_AI_PROVIDER') === 'ollama' || getenv('OLLAMA_HOST')) {
+  $ollama_host = getenv('OLLAMA_HOST') ?: 'http://host.docker.internal';
+  $config['ai_provider_ollama.settings']['host_name'] = $ollama_host;
+  $config['ai_provider_ollama.settings']['port'] = (int) (getenv('OLLAMA_PORT') ?: 11434);
+  $config['ai.settings']['default_providers']['chat'] = [
+    'provider_id' => 'ollama',
+    'model_id' => getenv('OLLAMA_CHAT_MODEL') ?: 'qwen2_5_32b',
+  ];
+  $config['ai.settings']['default_providers']['embeddings'] = [
+    'provider_id' => 'ollama',
+    'model_id' => getenv('OLLAMA_EMBED_MODEL') ?: 'nomic_embed_text_latest',
+  ];
+  $config['search_api.server.ai_chunks']['backend_config']['embeddings_engine'] = 'ollama__' . (getenv('OLLAMA_EMBED_MODEL') ?: 'nomic_embed_text_latest');
+  $config['search_api.server.ai_chunks']['backend_config']['embeddings_engine_configuration'] = [
+    'set_dimensions' => TRUE,
+    'dimensions' => 768,
+  ];
+}
+// If GEMINI_API_KEY is provided and OPENAI_API_KEY is unset, default the chat
+// provider and embeddings to Gemini.
+elseif (getenv('GEMINI_API_KEY') && !getenv('OPENAI_API_KEY')) {
+  $config['ai.settings']['default_providers']['chat'] = [
+    'provider_id' => 'gemini',
+    'model_id' => 'models/gemini-3.8-flash',
+  ];
+  $config['ai.settings']['default_providers']['embeddings'] = [
+    'provider_id' => 'gemini',
+    'model_id' => 'models/gemini-embedding-001',
+  ];
+  $config['search_api.server.ai_chunks']['backend_config']['embeddings_engine'] = 'gemini__models/gemini-embedding-001';
+  $config['search_api.server.ai_chunks']['backend_config']['embeddings_engine_configuration'] = [
+    'set_dimensions' => TRUE,
+    'dimensions' => 3072,
+  ];
+}
+

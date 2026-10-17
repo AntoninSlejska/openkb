@@ -1,0 +1,47 @@
+diff --git a/src/Plugin/AiProvider/GeminiProvider.php b/src/Plugin/AiProvider/GeminiProvider.php
+index b7e3b1c..d4e2a1b 100644
+--- a/src/Plugin/AiProvider/GeminiProvider.php
++++ b/src/Plugin/AiProvider/GeminiProvider.php
+@@ -791,10 +791,15 @@ class GeminiProvider extends AiProviderClientBase implements AiProviderInterfac
+     foreach ($properties as $property) {
+       $property_type = DataType::tryFrom(strtoupper($property->getType()));
++      $object_properties = NULL;
++      $object_required = NULL;
++      $items = NULL;
+       // Get object properties.
+       if ($property_type === DataType::OBJECT) {
+-        /** @var \Drupal\ai\OperationType\Chat\Tools\ToolsPropertyInputInterface[] $sub_properties */
++        /** @var \Drupal\ai\OperationType\Chat\Tools\ToolsPropertyInputInterface[]|null $sub_properties */
+         $sub_properties = $property->getProperties();
+-        [$object_properties, $object_required] = $this->buildSchema($sub_properties);
++        if (!empty($sub_properties) && is_array($sub_properties)) {
++          [$object_properties, $object_required] = $this->buildSchema($sub_properties);
++        }
+       }
+       // Set array items type.
+       elseif ($property_type === DataType::ARRAY) {
+@@ -810,14 +815,14 @@ class GeminiProvider extends AiProviderClientBase implements AiProviderInterfac
+       $property_name = $property->getName();
+       $schema_properties[$property_name] = new Schema(
+         type: $property_type,
+-        format: DataFormat::tryFrom($property->getFormat()),
++        format: $property->getFormat() ? DataFormat::tryFrom($property->getFormat()) : NULL,
+         description: $property->getDescription(),
+         enum: $property->getEnum(),
+         properties: $object_properties ?? NULL,
+         required: $object_required ?? NULL,
+         items: $items ?? NULL,
+-        minLength: $property->getMinLength(),
+-        maxLength: $property->getMaxLength(),
++        minLength: $property->getMinLength() !== NULL ? (string) $property->getMinLength() : NULL,
++        maxLength: $property->getMaxLength() !== NULL ? (string) $property->getMaxLength() : NULL,
+         pattern: $property->getPattern() ?: NULL,
+         example: $property->getExampleValue(),
+         default: $property->getDefault(),
+-        minimum: $property->getMinimum(),
+-        maximum: $property->getMaximum(),
++        minimum: $property->getMinimum() !== NULL ? (float) $property->getMinimum() : NULL,
++        maximum: $property->getMaximum() !== NULL ? (float) $property->getMaximum() : NULL,
+       );
+ 
+       // Collect required properties.
